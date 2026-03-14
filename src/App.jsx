@@ -3295,12 +3295,28 @@ function TasksTab({ data, db, setModal, getChild }) {
   const plannedFutureTasks = [...data.tasks]
     .filter(t => !isRecurringTemplateTask(t))
     .filter(t => (filter === "all" || t.childId === filter) && t.date > todayNow);
-  const generatedRecurringTasks = [...data.tasks]
-    .filter(t => !isRecurringTemplateTask(t))
-    .filter(t => {
+  const generatedRecurringTasks = (() => {
+    const inScope = [...data.tasks].filter(t => !isRecurringTemplateTask(t) && (filter === "all" || t.childId === filter));
+    const explicit = inScope.filter(t => !!parseTaskDesc(t.desc, t.coins).recurrenceSourceId);
+
+    const grouped = new Map();
+    for (const t of inScope) {
       const info = parseTaskDesc(t.desc, t.coins);
-      return (filter === "all" || t.childId === filter) && !!info.recurrenceSourceId;
-    });
+      const key = [t.childId, t.date, t.title, info.visibleDesc || "", info.dayPart || "allday", Number(info.maxCoins || t.coins || 0), t.status].join("||");
+      const arr = grouped.get(key) || [];
+      arr.push(t);
+      grouped.set(key, arr);
+    }
+
+    const likelyRecurringClones = [];
+    for (const arr of grouped.values()) {
+      if (arr.length > 1) likelyRecurringClones.push(...arr);
+    }
+
+    const unique = new Map();
+    [...explicit, ...likelyRecurringClones].forEach(t => unique.set(t.id, t));
+    return [...unique.values()];
+  })();
   const plannedScopeLabel = filter === "all" ? "alle kinderen" : (getChild(filter)?.name || "dit kind");
   const handleDeletePlannedTasks = async () => {
     if (plannedFutureTasks.length === 0) {
@@ -3316,12 +3332,12 @@ function TasksTab({ data, db, setModal, getChild }) {
       window.alert("Het verwijderen van de geplande taken is niet volledig gelukt.");
     }
   };
-  const handleDeleteGeneratedRecurringTasks = async () => {
+    const handleDeleteGeneratedRecurringTasks = async () => {
     if (generatedRecurringTasks.length === 0) {
-      window.alert("Er zijn geen gegenereerde terugkerende taken om te verwijderen.");
+      window.alert("Er zijn geen gegenereerde of foutief gekloonde terugkerende taken om te verwijderen.");
       return;
     }
-    const ok = window.confirm(`Weet je zeker dat je ${generatedRecurringTasks.length} gegenereerde terugkerende taak/taken wilt verwijderen voor ${plannedScopeLabel}? Terugkerende sjablonen blijven bestaan, maar de losse gegenereerde taken verdwijnen. Deze actie kun je niet ongedaan maken.`);
+    const ok = window.confirm(`Weet je zeker dat je ${generatedRecurringTasks.length} gegenereerde of foutief gekloonde terugkerende taak/taken wilt verwijderen voor ${plannedScopeLabel}? Terugkerende sjablonen blijven bestaan, maar de losse gegenereerde taken verdwijnen. Deze actie kun je niet ongedaan maken.`);
     if (!ok) return;
     try {
       await Promise.all(generatedRecurringTasks.map(t => db.delTask(t.id)));
@@ -3351,7 +3367,7 @@ function TasksTab({ data, db, setModal, getChild }) {
       <div className="sh">
         <span className="st">Alle Taken</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeleteGeneratedRecurringTasks}>🧹 Leeg terugkerende takenlijst{generatedRecurringTasks.length ? ` (${generatedRecurringTasks.length})` : ""}</button>
+          <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeleteGeneratedRecurringTasks}>🧹 Leeg terugkerende klonen{generatedRecurringTasks.length ? ` (${generatedRecurringTasks.length})` : ""}</button>
           <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeletePlannedTasks}>🗑 Verwijder geplande taken{plannedFutureTasks.length ? ` (${plannedFutureTasks.length})` : ""}</button>
           <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
         </div>
