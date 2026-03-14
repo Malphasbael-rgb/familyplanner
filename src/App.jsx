@@ -3318,6 +3318,14 @@ function TasksTab({ data, db, setModal, getChild }) {
     return [...unique.values()];
   })();
   const plannedScopeLabel = filter === "all" ? "alle kinderen" : (getChild(filter)?.name || "dit kind");
+  const bulkDeleteTaskIds = async (ids) => {
+    const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+    if (uniqueIds.length === 0) return;
+    const { error } = await supabase.from('tasks').delete().in('id', uniqueIds);
+    if (error) throw error;
+    reload();
+  };
+
   const handleDeletePlannedTasks = async () => {
     if (plannedFutureTasks.length === 0) {
       window.alert("Er zijn geen geplande toekomstige taken om te verwijderen.");
@@ -3326,13 +3334,14 @@ function TasksTab({ data, db, setModal, getChild }) {
     const ok = window.confirm(`Weet je zeker dat je ${plannedFutureTasks.length} geplande toekomstige taak/taken wilt verwijderen voor ${plannedScopeLabel}? Deze actie kun je niet ongedaan maken.`);
     if (!ok) return;
     try {
-      await Promise.all(plannedFutureTasks.map(t => db.delTask(t.id)));
+      await bulkDeleteTaskIds(plannedFutureTasks.map(t => t.id));
     } catch (err) {
       console.error("Geplande taken verwijderen mislukt:", err);
       window.alert("Het verwijderen van de geplande taken is niet volledig gelukt.");
     }
   };
-    const handleDeleteGeneratedRecurringTasks = async () => {
+
+  const handleDeleteGeneratedRecurringTasks = async () => {
     if (generatedRecurringTasks.length === 0) {
       window.alert("Er zijn geen gegenereerde of foutief gekloonde terugkerende taken om te verwijderen.");
       return;
@@ -3340,7 +3349,7 @@ function TasksTab({ data, db, setModal, getChild }) {
     const ok = window.confirm(`Weet je zeker dat je ${generatedRecurringTasks.length} gegenereerde of foutief gekloonde terugkerende taak/taken wilt verwijderen voor ${plannedScopeLabel}? Terugkerende sjablonen blijven bestaan, maar de losse gegenereerde taken verdwijnen. Deze actie kun je niet ongedaan maken.`);
     if (!ok) return;
     try {
-      await Promise.all(generatedRecurringTasks.map(t => db.delTask(t.id)));
+      await bulkDeleteTaskIds(generatedRecurringTasks.map(t => t.id));
     } catch (err) {
       console.error("Gegenereerde terugkerende taken verwijderen mislukt:", err);
       window.alert("Het verwijderen van de gegenereerde terugkerende taken is niet volledig gelukt.");
