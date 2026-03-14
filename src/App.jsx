@@ -3266,10 +3266,16 @@ function KidsTab({ data, db, setModal }) {
 function SettingsTab({ data, db, parentPin, levelThresholds }) {
   const [pinDraft, setPinDraft] = useState(parentPin || DEFAULT_PARENT_PIN);
   const [thresholdDraft, setThresholdDraft] = useState(normalizeLevelThresholds(levelThresholds));
+  const [thresholdDirty, setThresholdDirty] = useState(false);
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
-  useEffect(() => { setThresholdDraft(normalizeLevelThresholds(levelThresholds)); }, [levelThresholds]);
+  useEffect(() => {
+    if (!thresholdDirty) {
+      setThresholdDraft(normalizeLevelThresholds(levelThresholds));
+    }
+  }, [levelThresholds, thresholdDirty]);
 
   const updateThresholdAt = (idx, raw) => {
+    setThresholdDirty(true);
     setThresholdDraft(prev => {
       const next = [...prev];
       next[idx] = raw === "" ? "" : Math.max(0, parseInt(raw, 10) || 0);
@@ -3278,6 +3284,7 @@ function SettingsTab({ data, db, parentPin, levelThresholds }) {
   };
 
   const addLevelRow = () => {
+    setThresholdDirty(true);
     setThresholdDraft(prev => {
       const normalized = normalizeLevelThresholds(prev);
       const last = normalized[normalized.length - 1] || 0;
@@ -3286,6 +3293,7 @@ function SettingsTab({ data, db, parentPin, levelThresholds }) {
   };
 
   const removeLevelRow = () => {
+    setThresholdDirty(true);
     setThresholdDraft(prev => {
       const normalized = normalizeLevelThresholds(prev);
       return normalized.length <= 2 ? normalized : normalized.slice(0, -1);
@@ -3363,12 +3371,13 @@ function SettingsTab({ data, db, parentPin, levelThresholds }) {
         </div>
 
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop: 14 }}>
-          <button className="btn bp" onClick={() => db.updateLevelThresholds(normalizedDraft)}>Levelvereisten opslaan</button>
-          <button className="btn bh" onClick={() => setThresholdDraft(DEFAULT_LEVEL_THRESHOLDS)}>Standaard terugzetten</button>
+          <button className="btn bp" onClick={async () => { await db.updateLevelThresholds(normalizedDraft); setThresholdDirty(false); }}>Levelvereisten opslaan</button>
+          <button className="btn bh" onClick={() => { setThresholdDirty(true); setThresholdDraft(DEFAULT_LEVEL_THRESHOLDS); }}>Standaard terugzetten</button>
         </div>
 
         <div style={{ marginTop: 12, fontSize: 12, color: "var(--t2)" }}>
           De eerste regel hoort altijd op 0 te beginnen. De app bewaakt dat elk volgend level hoger ligt dan het vorige, zodat de ladder niet achteruit de kelder in valt.
+          {thresholdDirty ? <span style={{ display:"block", marginTop:6, color:"#b45309" }}>Niet-opgeslagen levelwijzigingen blijven nu staan terwijl de app op de achtergrond synchroniseert.</span> : null}
         </div>
       </div>
     </div>
