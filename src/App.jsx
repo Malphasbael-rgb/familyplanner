@@ -265,36 +265,6 @@ function getTaskDaysLeft(task, referenceDate = today) {
   return Math.max(0, info.durationDays - elapsedDays);
 }
 
-function getTaskNaturalKey(task) {
-  if (!task) return "";
-  const info = parseTaskDesc(task.desc, task.coins);
-  return [
-    task.childId || "",
-    task.date || "",
-    task.title || "",
-    info.visibleDesc || "",
-    info.recurrenceSourceId || "single",
-    normalizeDayPart(info.dayPart),
-  ].join("||");
-}
-
-function dedupeTasksByNaturalKey(tasks = []) {
-  const map = new Map();
-  for (const task of tasks) {
-    const key = getTaskNaturalKey(task);
-    if (!map.has(key)) map.set(key, task);
-  }
-  return [...map.values()];
-}
-
-function getTaskProgressRank(task) {
-  if (!task) return 0;
-  if (task.status === "approved") return 3;
-  if (task.status === "done") return 2;
-  if (task.status === "rejected") return 1;
-  return 0;
-}
-
 function isRecurringTemplateTask(task) {
   if (!task) return false;
   const info = parseTaskDesc(task.desc, task.coins);
@@ -2022,50 +1992,27 @@ export default function App() {
   const cleanupRecurringDuplicateTasks = useCallback(async () => {
     if (loading || !data.tasks?.length) return;
 
-    const templates = data.tasks.filter(isRecurringTemplateTask);
-    const templateDateSets = new Map(
-      templates.map((template) => [template.id, new Set(getRecurringPlannedDates(template))])
-    );
-
-    const keepByKey = new Map();
-    const toDelete = new Set();
+    const seen = new Map();
+    const toDelete = [];
 
     for (const task of data.tasks) {
       if (isRecurringTemplateTask(task)) continue;
       const info = parseTaskDesc(task.desc, task.coins);
-      const sourceId = info.recurrenceSourceId;
-      if (!sourceId) continue;
-
-      const allowedDates = templateDateSets.get(sourceId);
-      if (!allowedDates || !allowedDates.has(task.date)) {
-        toDelete.add(task.id);
-        continue;
-      }
-
-      const key = [sourceId, task.childId || "", task.date || ""].join("||");
-      const existing = keepByKey.get(key);
-      if (!existing) {
-        keepByKey.set(key, task);
-        continue;
-      }
-
-      const existingRank = getTaskProgressRank(existing);
-      const currentRank = getTaskProgressRank(task);
-      if (currentRank > existingRank) {
-        toDelete.add(existing.id);
-        keepByKey.set(key, task);
+      const visibleDesc = info.visibleDesc || "";
+      const recurrenceMarker = info.recurrenceSourceId || getTaskRecurrenceType(task);
+      if (!recurrenceMarker || recurrenceMarker === "none") continue;
+      const key = [task.childId, task.date, task.title, visibleDesc, recurrenceMarker].join("||");
+      if (!seen.has(key)) {
+        seen.set(key, task);
       } else {
-        toDelete.add(task.id);
+        toDelete.push(task.id);
       }
     }
 
-    if (!toDelete.size) return;
+    if (!toDelete.length) return;
 
-    const ids = [...toDelete];
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100);
-      const { error } = await supabase.from("tasks").delete().in("id", chunk);
-      if (error) throw error;
+    for (const id of toDelete) {
+      await dbDelTask(id);
     }
 
     await reload();
@@ -2185,10 +2132,6 @@ export default function App() {
   useEffect(() => {
     if (!loading) processRecurringTemplates().catch(err => console.error("Terugkerende taken verwerken mislukt:", err));
   }, [loading, data.tasks, processRecurringTemplates]);
-
-  useEffect(() => {
-    if (!loading) cleanupRecurringDuplicateTasks().catch(err => console.error("Dubbele terugkerende taken opschonen mislukt:", err));
-  }, [loading, data.tasks, cleanupRecurringDuplicateTasks]);
 
   // ── Realtime: luister naar wijzigingen in de database ──
   // Zodra een ander apparaat iets wijzigt, wordt de data hier automatisch bijgewerkt
@@ -2876,18 +2819,8 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
       <div className="home-kids">
         {data.children.map(c => {
           const th = getTheme(c.name);
-          const todayTasksForCard = dedupeTasksByNaturalKey(
-            data.tasks.filter(t =>
-              !isRecurringTemplateTask(t) &&
-              t.childId === c.id &&
-              t.date === today &&
-              getTaskRemainingCoins(t, today) > 0 &&
-              shouldKeepCompletedVisible(t, today) &&
-              isDayPartVisibleNow(parseTaskDesc(t.desc, t.coins).dayPart)
-            )
-          );
-          const todayDone = todayTasksForCard.filter(t => t.status !== "pending").length;
-          const todayTotal = todayTasksForCard.length;
+          const todayDone = data.tasks.filter(t => t.childId === c.id && t.date === today && t.status !== "pending").length;
+          const todayTotal = data.tasks.filter(t => t.childId === c.id && t.date === today).length;
           return (
             <div key={c.id} className="home-kid"
               style={{ border: `3px solid ${th.pri}44` }}
@@ -2929,25 +2862,23 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, levelThresholds }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
-  const allTodayTasks = dedupeTasksByNaturalKey(data.tasks.filter(t =>
-    !isRecurringTemplateTask(t) &&
+  const allTodayTasks = data.tasks.filter(t =>
     t.childId === activeKid &&
     t.date === todayNow &&
     getTaskRemainingCoins(t, todayNow) > 0 &&
     shouldKeepCompletedVisible(t, todayNow)
-  ));
+  );
   const todayTasks = allTodayTasks.filter((t) => {
     const meta = parseTaskDesc(t.desc, t.coins);
     return isDayPartVisibleNow(meta.dayPart);
   });
-  const missedTasks = dedupeTasksByNaturalKey(data.tasks
+  const missedTasks = data.tasks
     .filter(t =>
-      !isRecurringTemplateTask(t) &&
       t.childId === activeKid &&
       t.status === "pending" &&
       t.date < todayNow &&
       getTaskRemainingCoins(t, todayNow) > 0
-    ))
+    )
     .sort((a, b) => a.date.localeCompare(b.date));
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
@@ -3364,6 +3295,12 @@ function TasksTab({ data, db, setModal, getChild }) {
   const plannedFutureTasks = [...data.tasks]
     .filter(t => !isRecurringTemplateTask(t))
     .filter(t => (filter === "all" || t.childId === filter) && t.date > todayNow);
+  const generatedRecurringTasks = [...data.tasks]
+    .filter(t => !isRecurringTemplateTask(t))
+    .filter(t => {
+      const info = parseTaskDesc(t.desc, t.coins);
+      return (filter === "all" || t.childId === filter) && !!info.recurrenceSourceId;
+    });
   const plannedScopeLabel = filter === "all" ? "alle kinderen" : (getChild(filter)?.name || "dit kind");
   const handleDeletePlannedTasks = async () => {
     if (plannedFutureTasks.length === 0) {
@@ -3377,6 +3314,20 @@ function TasksTab({ data, db, setModal, getChild }) {
     } catch (err) {
       console.error("Geplande taken verwijderen mislukt:", err);
       window.alert("Het verwijderen van de geplande taken is niet volledig gelukt.");
+    }
+  };
+  const handleDeleteGeneratedRecurringTasks = async () => {
+    if (generatedRecurringTasks.length === 0) {
+      window.alert("Er zijn geen gegenereerde terugkerende taken om te verwijderen.");
+      return;
+    }
+    const ok = window.confirm(`Weet je zeker dat je ${generatedRecurringTasks.length} gegenereerde terugkerende taak/taken wilt verwijderen voor ${plannedScopeLabel}? Terugkerende sjablonen blijven bestaan, maar de losse gegenereerde taken verdwijnen. Deze actie kun je niet ongedaan maken.`);
+    if (!ok) return;
+    try {
+      await Promise.all(generatedRecurringTasks.map(t => db.delTask(t.id)));
+    } catch (err) {
+      console.error("Gegenereerde terugkerende taken verwijderen mislukt:", err);
+      window.alert("Het verwijderen van de gegenereerde terugkerende taken is niet volledig gelukt.");
     }
   };
   const tasks = [...data.tasks]
@@ -3400,6 +3351,7 @@ function TasksTab({ data, db, setModal, getChild }) {
       <div className="sh">
         <span className="st">Alle Taken</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeleteGeneratedRecurringTasks}>🧹 Leeg terugkerende takenlijst{generatedRecurringTasks.length ? ` (${generatedRecurringTasks.length})` : ""}</button>
           <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeletePlannedTasks}>🗑 Verwijder geplande taken{plannedFutureTasks.length ? ` (${plannedFutureTasks.length})` : ""}</button>
           <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
         </div>
