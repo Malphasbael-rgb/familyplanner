@@ -11,7 +11,9 @@ const getTodayISO = () => new Date().toISOString().split("T")[0];
 const today = getTodayISO();
 const genId = () => Math.random().toString(36).substr(2, 9);
 const PARENT_PIN_KEY = "familyplanner-parent-pin-v1";
+const LEVEL_THRESHOLDS_KEY = "familyplanner-level-thresholds-v1";
 const DEFAULT_PARENT_PIN = "258000";
+const DEFAULT_LEVEL_THRESHOLDS = [0, 25, 60, 110, 180, 270, 380, 520, 700, 920];
 const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
 const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
 const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
@@ -28,6 +30,29 @@ const getStoredParentPin = () => {
 const setStoredParentPin = (pin) => {
   try { localStorage.setItem(PARENT_PIN_KEY, pin); } catch {}
 };
+const normalizeLevelThresholds = (input) => {
+  const base = Array.isArray(input) ? input : DEFAULT_LEVEL_THRESHOLDS;
+  const nums = base
+    .map(v => Math.max(0, parseInt(v, 10) || 0))
+    .slice(0, 20);
+  if (!nums.length) return [...DEFAULT_LEVEL_THRESHOLDS];
+  nums[0] = 0;
+  for (let i = 1; i < nums.length; i++) {
+    nums[i] = Math.max(nums[i], nums[i - 1] + 1);
+  }
+  return nums;
+};
+const getStoredLevelThresholds = () => {
+  try {
+    return normalizeLevelThresholds(JSON.parse(localStorage.getItem(LEVEL_THRESHOLDS_KEY) || "null"));
+  } catch {
+    return [...DEFAULT_LEVEL_THRESHOLDS];
+  }
+};
+const setStoredLevelThresholds = (thresholds) => {
+  try { localStorage.setItem(LEVEL_THRESHOLDS_KEY, JSON.stringify(normalizeLevelThresholds(thresholds))); } catch {}
+};
+
 const isCloudSettingsReward = (r) => r?.id === CLOUD_SETTINGS_REWARD_ID || r?.title === CLOUD_SETTINGS_TITLE;
 const stripCloudSettingsFromData = (d) => ({
   ...d,
@@ -40,22 +65,42 @@ const getPenaltyReason = (r) => {
   const title = String(r?.rewardTitle || "");
   return title.replace(/^Ecoins afgepakt\s*[—-]\s*/i, "").trim() || "Geen reden opgegeven";
 };
-async function fetchParentPinFromCloud() {
+async function fetchCloudSettings() {
   const res = await supabase.from("rewards").select("id,title,description").eq("id", CLOUD_SETTINGS_REWARD_ID).maybeSingle();
-  if (res.error) throw new Error(`loadParentPin: ${res.error.message}`);
+  if (res.error) throw new Error(`loadSettings: ${res.error.message}`);
   const raw = res.data?.description || "";
-  if (!raw) return null;
+  if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
-    return /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null;
+    return {
+      parentPin: /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null,
+      levelThresholds: normalizeLevelThresholds(parsed?.levelThresholds),
+    };
   } catch {
-    return null;
+    return {};
   }
 }
-async function saveParentPinToCloud(pin) {
-  const payload = { id: CLOUD_SETTINGS_REWARD_ID, title: CLOUD_SETTINGS_TITLE, description: JSON.stringify({ parentPin: pin }), cost: 999999, emoji: "🔐" };
+async function saveCloudSettings(settings = {}) {
+  const current = await fetchCloudSettings().catch(() => ({}));
+  const payload = {
+    id: CLOUD_SETTINGS_REWARD_ID,
+    title: CLOUD_SETTINGS_TITLE,
+    description: JSON.stringify({
+      parentPin: /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : (current.parentPin || getStoredParentPin()),
+      levelThresholds: normalizeLevelThresholds(settings.levelThresholds || current.levelThresholds || getStoredLevelThresholds()),
+    }),
+    cost: 999999,
+    emoji: "🔐"
+  };
   const res = await supabase.from("rewards").upsert(payload, { onConflict: "id" }).select("id").single();
-  if (res.error) throw new Error(`saveParentPin: ${res.error.message}`);
+  if (res.error) throw new Error(`saveSettings: ${res.error.message}`);
+}
+async function fetchParentPinFromCloud() {
+  const settings = await fetchCloudSettings();
+  return settings.parentPin || null;
+}
+async function saveParentPinToCloud(pin) {
+  return saveCloudSettings({ parentPin: pin });
 }
 
 function diffDays(fromDate, toDate) {
@@ -284,7 +329,7 @@ function addDaysISO(isoDate, days) {
   return d.toISOString().split("T")[0];
 }
 
-function buildChildStats(data, childId, referenceDate = getTodayISO()) {
+function buildChildStats(data, childId, referenceDate = getTodayISO(), customLevelThresholds = DEFAULT_LEVEL_THRESHOLDS) {
   const childTasks = (data?.tasks || []).filter(t => t.childId === childId && !isRecurringTemplateTask(t));
   const approvedTasks = childTasks.filter(t => t.status === "approved");
   const doneTasks = childTasks.filter(t => t.status === "done");
@@ -327,7 +372,7 @@ function buildChildStats(data, childId, referenceDate = getTodayISO()) {
   const totalEarnedEver = approvedTasks.reduce((s, t) => s + Number(t.coins || 0), 0) + positiveBonuses.reduce((s, r) => s + Number(r.cost || 0), 0);
   const totalApprovedTasks = approvedTasks.length;
 
-  const levelThresholds = [0, 25, 60, 110, 180, 270, 380, 520, 700, 920];
+  const levelThresholds = normalizeLevelThresholds(customLevelThresholds);
   let level = 1;
   for (let i = 0; i < levelThresholds.length; i++) {
     if (totalEarnedEver >= levelThresholds[i]) level = i + 1;
@@ -1777,33 +1822,45 @@ export default function App() {
   const [pinChild,  setPinChild]  = useState(null);
   const [pinParent, setPinParent] = useState(false);
   const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
+  const [levelThresholds, setLevelThresholds] = useState(DEFAULT_LEVEL_THRESHOLDS);
 
   // ── Laad data uit Supabase bij opstarten ──
   useEffect(() => {
-    Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
-      .then(([dataRes, pinRes]) => {
+    Promise.allSettled([loadAll(), fetchCloudSettings()])
+      .then(([dataRes, settingsRes]) => {
         if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
         else console.error("Laad fout:", dataRes.reason);
-        if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
-          setParentPin(pinRes.value);
-          setStoredParentPin(pinRes.value);
-        } else {
-          setParentPin(getStoredParentPin());
-        }
+
+        const settings = settingsRes.status === "fulfilled" ? (settingsRes.value || {}) : {};
+        const nextParentPin = /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : getStoredParentPin();
+        const nextThresholds = normalizeLevelThresholds(settings.levelThresholds || getStoredLevelThresholds());
+        setParentPin(nextParentPin);
+        setStoredParentPin(nextParentPin);
+        setLevelThresholds(nextThresholds);
+        setStoredLevelThresholds(nextThresholds);
         setLoading(false);
       })
-      .catch(err => { console.error("Laad fout:", err); setParentPin(getStoredParentPin()); setLoading(false); });
+      .catch(err => {
+        console.error("Laad fout:", err);
+        setParentPin(getStoredParentPin());
+        setLevelThresholds(getStoredLevelThresholds());
+        setLoading(false);
+      });
   }, []);
 
   // ── Helper: herlaad alle data na een wijziging ──
-  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
-    .then(([dataRes, pinRes]) => {
+  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchCloudSettings()])
+    .then(([dataRes, settingsRes]) => {
       if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
       else console.error(dataRes.reason);
-      if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
-        setParentPin(pinRes.value);
-        setStoredParentPin(pinRes.value);
-      }
+
+      const settings = settingsRes.status === "fulfilled" ? (settingsRes.value || {}) : {};
+      const nextParentPin = /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : getStoredParentPin();
+      const nextThresholds = normalizeLevelThresholds(settings.levelThresholds || getStoredLevelThresholds());
+      setParentPin(nextParentPin);
+      setStoredParentPin(nextParentPin);
+      setLevelThresholds(nextThresholds);
+      setStoredLevelThresholds(nextThresholds);
     })
     .catch(console.error), []);
 
@@ -1988,6 +2045,13 @@ export default function App() {
       setParentPin(pin);
       reload();
     },
+    updateLevelThresholds: async (thresholds) => {
+      const normalized = normalizeLevelThresholds(thresholds);
+      await saveCloudSettings({ levelThresholds: normalized });
+      setStoredLevelThresholds(normalized);
+      setLevelThresholds(normalized);
+      reload();
+    },
     delChild: async (id) => {
       await dbDelChild(id);
       reload();
@@ -2068,7 +2132,7 @@ export default function App() {
       const todayIso = getTodayISO();
       const yesterday = addDaysISO(todayIso, -1);
       for (const child of data.children) {
-        const stats = buildChildStats(data, child.id, todayIso);
+        const stats = buildChildStats(data, child.id, todayIso, levelThresholds);
         if (![3, 7, 14].includes(stats.streak)) continue;
         const bonusAmount = stats.streak === 3 ? 5 : stats.streak === 7 ? 10 : 20;
         const rewardId = `bonus:streak:${child.id}:${todayIso}:${stats.streak}`;
@@ -2176,7 +2240,7 @@ export default function App() {
               <button className="back-btn" onClick={goHome}>← Terug</button>
             </header>
             <main className="main">
-              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} />
+              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} levelThresholds={levelThresholds} />
             </main>
           </>
         )}
@@ -2567,7 +2631,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 }
 
 // ─── CHILD VIEW ────────────────────────────────────────────────────────────────
-function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
+function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, levelThresholds }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
   const todayTasks = data.tasks.filter(t =>
@@ -2587,7 +2651,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
   const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
-  const stats = buildChildStats(data, activeKid, todayNow);
+  const stats = buildChildStats(data, activeKid, todayNow, levelThresholds);
   const myGoals = data.rewards.filter(r => isGoalReward(r) && rewardVisibleForChild(r, activeKid));
 
   const [feitje]  = useState(() => FEITJES[Math.floor(Math.random() * FEITJES.length)]);
@@ -2911,7 +2975,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
 }
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
-function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
+function ParentView({ data, db, tab, setTab, setModal, parentPin, levelThresholds }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
@@ -2951,13 +3015,13 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
           <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
-      {tab === "dashboard" && <DashboardTab data={data} getChild={getChild} />}
+      {tab === "dashboard" && <DashboardTab data={data} getChild={getChild} levelThresholds={levelThresholds} />}
       {tab === "tasks"     && <TasksTab     data={data} db={db} setModal={setModal} getChild={getChild} />}
       {tab === "approve"   && <ApproveTab   data={data} db={db} pending={pending}   getChild={getChild} />}
       {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
       {tab === "rewards"   && <RewardsTab   data={data} db={db} setModal={setModal} />}
       {tab === "purchases" && <PurchasesTab data={data} db={db} getChild={getChild} />}
-      {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} />}
+      {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} levelThresholds={levelThresholds} />}
     </div>
   );
 }
@@ -3055,9 +3119,9 @@ function TasksTab({ data, db, setModal, getChild }) {
 }
 
 
-function DashboardTab({ data, getChild }) {
+function DashboardTab({ data, getChild, levelThresholds }) {
   const todayNow = getTodayISO();
-  const childStats = data.children.map(c => ({ child: c, stats: buildChildStats(data, c.id, todayNow) }));
+  const childStats = data.children.map(c => ({ child: c, stats: buildChildStats(data, c.id, todayNow, levelThresholds) }));
   const top = [...childStats].sort((a, b) => (b.stats.weekEarnedCoins - b.stats.weekPenaltyCoins) - (a.stats.weekEarnedCoins - a.stats.weekPenaltyCoins))[0];
   const pendingApprovals = data.tasks.filter(t => t.status === "done").length;
   const pendingPurchases = data.redemptions.filter(r => r.status === "pending" && !isPenaltyRedemption(r)).length;
@@ -3196,9 +3260,46 @@ function KidsTab({ data, db, setModal }) {
   );
 }
 
-function SettingsTab({ data, db, parentPin }) {
+function SettingsTab({ data, db, parentPin, levelThresholds }) {
   const [pinDraft, setPinDraft] = useState(parentPin || DEFAULT_PARENT_PIN);
+  const [thresholdDraft, setThresholdDraft] = useState(normalizeLevelThresholds(levelThresholds));
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
+  useEffect(() => { setThresholdDraft(normalizeLevelThresholds(levelThresholds)); }, [levelThresholds]);
+
+  const updateThresholdAt = (idx, raw) => {
+    setThresholdDraft(prev => {
+      const next = [...prev];
+      next[idx] = raw === "" ? "" : Math.max(0, parseInt(raw, 10) || 0);
+      return next;
+    });
+  };
+
+  const addLevelRow = () => {
+    setThresholdDraft(prev => {
+      const normalized = normalizeLevelThresholds(prev);
+      const last = normalized[normalized.length - 1] || 0;
+      return [...normalized, last + 250];
+    });
+  };
+
+  const removeLevelRow = () => {
+    setThresholdDraft(prev => {
+      const normalized = normalizeLevelThresholds(prev);
+      return normalized.length <= 2 ? normalized : normalized.slice(0, -1);
+    });
+  };
+
+  const normalizedDraft = normalizeLevelThresholds(thresholdDraft);
+  const levelRows = normalizedDraft.map((start, idx) => {
+    const next = normalizedDraft[idx + 1];
+    return {
+      level: idx + 1,
+      start,
+      next,
+      span: next != null ? Math.max(1, next - start) : 250,
+    };
+  });
+
   return (
     <div>
       <div className="sh"><span className="st">Instellingen ⚙️</span></div>
@@ -3217,6 +3318,54 @@ function SettingsTab({ data, db, parentPin }) {
           <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 14 }}>Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.</div>
           <button className="btn bh" style={{ color: "var(--red)" }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
           <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom: 10 }}>
+          <div>
+            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800 }}>📈 Levels instellen</div>
+            <div style={{ fontSize: 12, color: "var(--t2)" }}>Hier bepaal je vanaf hoeveel totaal ooit verdiende ecoins een kind een nieuw level bereikt.</div>
+          </div>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <button className="btn bh bsm" onClick={removeLevelRow} disabled={normalizedDraft.length <= 2}>Laatste level weg</button>
+            <button className="btn bh bsm" onClick={addLevelRow}>+ Level toevoegen</button>
+          </div>
+        </div>
+
+        <div style={{ display:"grid", gap:10 }}>
+          {levelRows.map((row, idx) => (
+            <div key={idx} className="tr" style={{ alignItems:"center" }}>
+              <div style={{ minWidth: 110, fontWeight: 800 }}>Level {row.level}</div>
+              <div style={{ flex: 1, display:"grid", gridTemplateColumns:"minmax(120px,180px) 1fr", gap:10, alignItems:"center" }}>
+                <div className="fg" style={{ margin:0 }}>
+                  <label className="fl">Start vanaf</label>
+                  <input
+                    className="fi"
+                    type="number"
+                    min={idx === 0 ? 0 : Math.max(1, normalizedDraft[idx - 1] + 1)}
+                    value={thresholdDraft[idx]}
+                    onChange={e => updateThresholdAt(idx, e.target.value)}
+                    disabled={idx === 0}
+                  />
+                </div>
+                <div style={{ fontSize: 12, color: "var(--t2)" }}>
+                  {row.next != null
+                    ? `Level ${row.level} loopt van ${row.start} t/m ${row.next - 1} totaal verdiende ecoins. Volgend level na ${row.span} extra coin${row.span === 1 ? "" : "s"}.`
+                    : `Laatste level start bij ${row.start}. Zonder extra grens blijft de app steeds nieuwe niveaus tonen in stappen van ${row.span} coins.`}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop: 14 }}>
+          <button className="btn bp" onClick={() => db.updateLevelThresholds(normalizedDraft)}>Levelvereisten opslaan</button>
+          <button className="btn bh" onClick={() => setThresholdDraft(DEFAULT_LEVEL_THRESHOLDS)}>Standaard terugzetten</button>
+        </div>
+
+        <div style={{ marginTop: 12, fontSize: 12, color: "var(--t2)" }}>
+          De eerste regel hoort altijd op 0 te beginnen. De app bewaakt dat elk volgend level hoger ligt dan het vorige, zodat de ladder niet achteruit de kelder in valt.
         </div>
       </div>
     </div>
