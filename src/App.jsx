@@ -74,6 +74,12 @@ function getTaskRemainingCoins(task, referenceDate = today) {
   return Math.max(0, info.maxCoins - (info.baseDecay * elapsedDays));
 }
 
+function getTaskDaysLeft(task, referenceDate = today) {
+  const info = parseTaskDesc(task.desc, task.coins);
+  const elapsedDays = Math.max(0, diffDays(task.date, referenceDate));
+  return Math.max(0, info.durationDays - elapsedDays);
+}
+
 const DAGEN   = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
 const MAANDEN = ["januari","februari","maart","april","mei","juni","juli","augustus","september","oktober","november","december"];
 const AVATARS = ["👧","👦","🧒","🦊","🐱","🐶","🐸","🦄","🐻","🐼","🐯","🐨"];
@@ -1996,9 +2002,18 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 // ─── CHILD VIEW ────────────────────────────────────────────────────────────────
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
   const cur = data.children.find(c => c.id === activeKid);
-  const todayTasks = data.tasks.filter(t => t.childId === activeKid && t.date === today);
+  const todayTasks = data.tasks.filter(t =>
+    t.childId === activeKid &&
+    t.date === today &&
+    getTaskRemainingCoins(t, today) > 0
+  );
   const missedTasks = data.tasks
-    .filter(t => t.childId === activeKid && t.status === "pending" && t.date < today)
+    .filter(t =>
+      t.childId === activeKid &&
+      t.status === "pending" &&
+      t.date < today &&
+      getTaskRemainingCoins(t, today) > 0
+    )
     .sort((a, b) => a.date.localeCompare(b.date));
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
@@ -2222,6 +2237,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const th = theme || DEFAULT_THEME;
   const isNevah = childName === "Nevah";
   const taskMeta = parseTaskDesc(task.desc, task.coins);
+  const daysLeft = getTaskDaysLeft(task, today);
 
   const handleCheck = () => {
     if (done || appr) return;
@@ -2261,6 +2277,11 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340" }}>{task.title}</div>
         {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
+        {!done && !appr && (
+          <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
+            📅 Startdatum {task.date} · ⏳ Nog {daysLeft} dag{daysLeft === 1 ? "" : "en"} over
+          </div>
+        )}
         {isMissed && !done && !appr && (
           <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 3 }}>
             ⏰ Gemist sinds {task.date} · {taskMeta.baseDecay} coin{taskMeta.baseDecay === 1 ? "" : "s"} verval per gemiste dag
@@ -2560,15 +2581,20 @@ function AddTaskModal({ close, db, children }) {
   const [coins,   setCoins]   = useState(10);
   const [date,    setDate]    = useState(today);
   const [durationDays, setDurationDays] = useState(3);
-  const go = () => {
+  const BOTH_CHILDREN_VALUE = "__all_children__";
+  const go = async () => {
     if (title.trim() && childId) {
-      db.addTask({
+      const baseTask = {
         title: title.trim(),
         desc: encodeTaskDesc(desc, { maxCoins: +coins, durationDays: +durationDays }),
-        childId,
         coins: +coins,
         date,
-      });
+      };
+      if (childId === BOTH_CHILDREN_VALUE) {
+        await Promise.all(children.map((child) => db.addTask({ ...baseTask, childId: child.id })));
+      } else {
+        await db.addTask({ ...baseTask, childId });
+      }
       close();
     }
   };
@@ -2588,8 +2614,12 @@ function AddTaskModal({ close, db, children }) {
             <div className="fr">
               <div className="fg"><label className="fl">Kind</label>
                 <select className="fs" value={childId} onChange={e => setChildId(e.target.value)}>
+                  {children.length > 1 && <option value={BOTH_CHILDREN_VALUE}>👦👧 Beide kinderen</option>}
                   {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
                 </select>
+                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
+                  {childId === BOTH_CHILDREN_VALUE ? "Er worden twee losse taken aangemaakt, één per kind." : "Deze taak wordt aan één kind toegewezen."}
+                </div>
               </div>
               <div className="fg"><label className="fl">Datum</label>
                 <input className="fi" type="date" value={date} onChange={e => setDate(e.target.value)} />
