@@ -1989,6 +1989,35 @@ export default function App() {
     })
     .catch(console.error), []);
 
+  const cleanupRecurringDuplicateTasks = useCallback(async () => {
+    if (loading || !data.tasks?.length) return;
+
+    const seen = new Map();
+    const toDelete = [];
+
+    for (const task of data.tasks) {
+      if (isRecurringTemplateTask(task)) continue;
+      const info = parseTaskDesc(task.desc, task.coins);
+      const visibleDesc = info.visibleDesc || "";
+      const recurrenceMarker = info.recurrenceSourceId || getTaskRecurrenceType(task);
+      if (!recurrenceMarker || recurrenceMarker === "none") continue;
+      const key = [task.childId, task.date, task.title, visibleDesc, recurrenceMarker].join("||");
+      if (!seen.has(key)) {
+        seen.set(key, task);
+      } else {
+        toDelete.push(task.id);
+      }
+    }
+
+    if (!toDelete.length) return;
+
+    for (const id of toDelete) {
+      await dbDelTask(id);
+    }
+
+    await reload();
+  }, [data.tasks, loading, reload]);
+
   const processRecurringTemplates = useCallback(async () => {
     if (loading || !data.tasks?.length) return;
 
