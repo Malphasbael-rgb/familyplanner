@@ -3292,6 +3292,24 @@ function TasksTab({ data, db, setModal, getChild }) {
   const recurringTemplates = [...data.tasks]
     .filter(t => isRecurringTemplateTask(t) && (filter === "all" || t.childId === filter))
     .sort((a, b) => a.date.localeCompare(b.date));
+  const plannedFutureTasks = [...data.tasks]
+    .filter(t => !isRecurringTemplateTask(t))
+    .filter(t => (filter === "all" || t.childId === filter) && t.date > todayNow);
+  const plannedScopeLabel = filter === "all" ? "alle kinderen" : (getChild(filter)?.name || "dit kind");
+  const handleDeletePlannedTasks = async () => {
+    if (plannedFutureTasks.length === 0) {
+      window.alert("Er zijn geen geplande toekomstige taken om te verwijderen.");
+      return;
+    }
+    const ok = window.confirm(`Weet je zeker dat je ${plannedFutureTasks.length} geplande toekomstige taak/taken wilt verwijderen voor ${plannedScopeLabel}? Deze actie kun je niet ongedaan maken.`);
+    if (!ok) return;
+    try {
+      await Promise.all(plannedFutureTasks.map(t => db.delTask(t.id)));
+    } catch (err) {
+      console.error("Geplande taken verwijderen mislukt:", err);
+      window.alert("Het verwijderen van de geplande taken is niet volledig gelukt.");
+    }
+  };
   const tasks = [...data.tasks]
     .filter(t => !isRecurringTemplateTask(t))
     .filter(t => (
@@ -3312,7 +3330,10 @@ function TasksTab({ data, db, setModal, getChild }) {
     <div>
       <div className="sh">
         <span className="st">Alle Taken</span>
-        <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeletePlannedTasks}>🗑 Verwijder geplande taken{plannedFutureTasks.length ? ` (${plannedFutureTasks.length})` : ""}</button>
+          <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
+        </div>
       </div>
       <div className="frow">
         <button className={`btn bsm ${showHistory ? "bp" : "bh"}`} onClick={() => setShowHistory(v => !v)}>{showHistory ? "📚 Verberg geschiedenis" : "📚 Toon geschiedenis"}</button>
