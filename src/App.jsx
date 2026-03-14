@@ -7,7 +7,8 @@ import {
   dbAddRedemption, dbUpdateRedemptionStatus,
 } from "./supabase.js";
 
-const today = new Date().toISOString().split("T")[0];
+const getTodayISO = () => new Date().toISOString().split("T")[0];
+const today = getTodayISO();
 const genId = () => Math.random().toString(36).substr(2, 9);
 const PARENT_PIN_KEY = "familyplanner-parent-pin-v1";
 const DEFAULT_PARENT_PIN = "258000";
@@ -31,6 +32,13 @@ const stripCloudSettingsFromData = (d) => ({
   ...d,
   rewards: Array.isArray(d?.rewards) ? d.rewards.filter(r => !isCloudSettingsReward(r)) : [],
 });
+
+const isPenaltyRedemption = (r) => Number(r?.cost || 0) < 0 || String(r?.rewardId || "").startsWith("penalty:");
+const getPenaltyReason = (r) => {
+  if (!isPenaltyRedemption(r)) return "";
+  const title = String(r?.rewardTitle || "");
+  return title.replace(/^Ecoins afgepakt\s*[—-]\s*/i, "").trim() || "Geen reden opgegeven";
+};
 async function fetchParentPinFromCloud() {
   const res = await supabase.from("rewards").select("id,title,description").eq("id", CLOUD_SETTINGS_REWARD_ID).maybeSingle();
   if (res.error) throw new Error(`loadParentPin: ${res.error.message}`);
@@ -75,6 +83,8 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
   const payload = {
     maxCoins: Math.max(1, Number(meta.maxCoins || 1)),
     durationDays: Math.max(1, parseInt(meta.durationDays || 1, 10)),
+    doneOn: typeof meta.doneOn === "string" ? meta.doneOn : null,
+    approvedOn: typeof meta.approvedOn === "string" ? meta.approvedOn : null,
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -101,8 +111,32 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const durationDays = Math.max(1, parseInt(meta.durationDays || 1, 10));
   const baseDecay = Math.floor(maxCoins / durationDays);
   const lastDecay = maxCoins - (baseDecay * (durationDays - 1));
+  const doneOn = typeof meta.doneOn === "string" ? meta.doneOn : null;
+  const approvedOn = typeof meta.approvedOn === "string" ? meta.approvedOn : null;
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn };
+}
+
+function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
+  const info = parseTaskDesc(rawDesc, fallbackCoins);
+  return encodeTaskDesc(info.visibleDesc, {
+    maxCoins: info.maxCoins,
+    durationDays: info.durationDays,
+    doneOn: Object.prototype.hasOwnProperty.call(patch, "doneOn") ? patch.doneOn : info.doneOn,
+    approvedOn: Object.prototype.hasOwnProperty.call(patch, "approvedOn") ? patch.approvedOn : info.approvedOn,
+  });
+}
+
+function shouldKeepCompletedVisible(task, referenceDate = getTodayISO()) {
+  if (!task) return false;
+  const info = parseTaskDesc(task.desc, task.coins);
+  if (task.status === "done") {
+    return (info.doneOn || task.date) === referenceDate;
+  }
+  if (task.status === "approved") {
+    return (info.approvedOn || info.doneOn || task.date) === referenceDate;
+  }
+  return true;
 }
 
 function getTaskRemainingCoins(task, referenceDate = today) {
@@ -1654,6 +1688,26 @@ export default function App() {
       await dbUpdateChildCoins(id, Math.max(0, Number(coins) || 0));
       reload();
     },
+    takeCoins: async (id, amount, reason) => {
+      const child = data.children.find(c => c.id === id);
+      const wanted = Math.max(0, Number(amount) || 0);
+      if (!child || wanted <= 0) return;
+      const actual = Math.min(child.coins || 0, wanted);
+      if (actual <= 0) return;
+      const cleanReason = String(reason || "").trim() || "Geen reden opgegeven";
+      await dbUpdateChildCoins(id, Math.max(0, (child.coins || 0) - actual));
+      await supabase.from('redemptions').insert({
+        id: genId(),
+        child_id: id,
+        reward_id: `penalty:${genId()}`,
+        reward_title: `Ecoins afgepakt — ${cleanReason}`,
+        reward_emoji: '⚠️',
+        cost: -actual,
+        date: getTodayISO(),
+        status: 'approved'
+      });
+      reload();
+    },
     resetAllCoins: async () => {
       await Promise.all(data.children.map(c => dbUpdateChildCoins(c.id, 0)));
       reload();
@@ -1679,19 +1733,26 @@ export default function App() {
       reload();
     },
     markDone: async (id) => {
-      await dbUpdateTaskStatus(id, 'done');
+      const task = data.tasks.find(t => t.id === id);
+      if (!task) return;
+      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: getTodayISO(), approvedOn: null });
+      await supabase.from('tasks').update({ status: 'done', description }).eq('id', id);
       reload();
     },
     approve: async (id) => {
       const task = data.tasks.find(t => t.id === id);
       if (!task) return;
-      await dbUpdateTaskStatus(id, 'approved');
+      const description = updateTaskDescMeta(task.desc, task.coins, { approvedOn: getTodayISO() });
+      await supabase.from('tasks').update({ status: 'approved', description }).eq('id', id);
       const child = data.children.find(c => c.id === task.childId);
       if (child) await dbUpdateChildCoins(child.id, child.coins + task.coins);
       reload();
     },
     reject: async (id) => {
-      await dbUpdateTaskStatus(id, 'pending');
+      const task = data.tasks.find(t => t.id === id);
+      if (!task) return;
+      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: null, approvedOn: null });
+      await supabase.from('tasks').update({ status: 'pending', description }).eq('id', id);
       reload();
     },
     addReward: async (r) => {
@@ -1741,7 +1802,7 @@ export default function App() {
   };
 
   const enterChildScreen = (id) => {
-    const currentApproved = data.tasks.filter(t => t.childId === id && t.status === "approved").map(t => t.id);
+    const currentApproved = data.tasks.filter(t => t.childId === id && t.status === "approved" && shouldKeepCompletedVisible(t, getTodayISO())).map(t => t.id);
     const prev = prevApproved[id] || [];
     const newlyApproved = currentApproved.filter(tid => !prev.includes(tid));
     const newCoins = newlyApproved.reduce((sum, tid) => {
@@ -2203,17 +2264,19 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 // ─── CHILD VIEW ────────────────────────────────────────────────────────────────
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
   const cur = data.children.find(c => c.id === activeKid);
+  const todayNow = getTodayISO();
   const todayTasks = data.tasks.filter(t =>
     t.childId === activeKid &&
-    t.date === today &&
-    getTaskRemainingCoins(t, today) > 0
+    t.date === todayNow &&
+    getTaskRemainingCoins(t, todayNow) > 0 &&
+    shouldKeepCompletedVisible(t, todayNow)
   );
   const missedTasks = data.tasks
     .filter(t =>
       t.childId === activeKid &&
       t.status === "pending" &&
-      t.date < today &&
-      getTaskRemainingCoins(t, today) > 0
+      t.date < todayNow &&
+      getTaskRemainingCoins(t, todayNow) > 0
     )
     .sort((a, b) => a.date.localeCompare(b.date));
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
@@ -2325,7 +2388,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           onClick={() => setKidTab("missed")}>⏰ Gemist{missedTasks.length ? ` (${missedTasks.length})` : ""}</button>
         <button className={`tab ${kidTab === "purchases" ? "on" : ""}`}
           style={kidTab === "purchases" ? { color: th.pri } : {}}
-          onClick={() => setKidTab("purchases")}>🛍️ Mijn Aankopen</button>
+          onClick={() => setKidTab("purchases")}>📜 Geschiedenis</button>
       </div>
 
       {kidTab === "tasks" && (
@@ -2550,7 +2613,11 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
 
 function TasksTab({ data, db, setModal, getChild }) {
   const [filter, setFilter] = useState("all");
-  const tasks = [...data.tasks].filter(t => filter === "all" || t.childId === filter).sort((a,b) => a.date.localeCompare(b.date));
+  const [showHistory, setShowHistory] = useState(false);
+  const todayNow = getTodayISO();
+  const tasks = [...data.tasks]
+    .filter(t => (filter === "all" || t.childId === filter) && (t.status === "pending" || shouldKeepCompletedVisible(t, todayNow) || (showHistory && (t.status === "done" || t.status === "approved"))))
+    .sort((a,b) => a.date.localeCompare(b.date));
   const statusEl = (s) => {
     if (s === "pending") return <span className="bd bbl">Te doen</span>;
     if (s === "done")    return <span className="bd by">⏳ Wacht</span>;
@@ -2563,6 +2630,7 @@ function TasksTab({ data, db, setModal, getChild }) {
         <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
       </div>
       <div className="frow">
+        <button className={`btn bsm ${showHistory ? "bp" : "bh"}`} onClick={() => setShowHistory(v => !v)}>{showHistory ? "📚 Verberg geschiedenis" : "📚 Toon geschiedenis"}</button>
         <button className={`btn bsm ${filter === "all" ? "bp" : "bh"}`} onClick={() => setFilter("all")}>Alle kinderen</button>
         {data.children.map(c => (
           <button key={c.id} className={`btn bsm ${filter === c.id ? "bp" : "bh"}`} onClick={() => setFilter(c.id)}>{c.avatar} {c.name}</button>
@@ -2622,9 +2690,13 @@ function ApproveTab({ data, db, pending, getChild }) {
 function KidsTab({ data, db, setModal }) {
   const [pinDrafts, setPinDrafts] = useState({});
   const [coinDrafts, setCoinDrafts] = useState({});
+  const [penaltyDrafts, setPenaltyDrafts] = useState({});
+  const [penaltyReasons, setPenaltyReasons] = useState({});
 
   const pinValue = (child) => pinDrafts[child.id] ?? child.pin ?? "";
   const coinValue = (child) => coinDrafts[child.id] ?? String(child.coins ?? 0);
+  const penaltyValue = (child) => penaltyDrafts[child.id] ?? "";
+  const penaltyReasonValue = (child) => penaltyReasons[child.id] ?? "";
 
   return (
     <div>
@@ -2658,6 +2730,30 @@ function KidsTab({ data, db, setModal }) {
               <button className="btn bg bsm" style={{ flex: 1 }} onClick={() => db.setChildCoins(c.id, coinValue(c))}>Coins opslaan</button>
               <button className="btn bh bsm" style={{ flex: 1 }} onClick={() => { setCoinDrafts(s => ({ ...s, [c.id]: "0" })); db.setChildCoins(c.id, 0); }}>Reset coins</button>
             </div>
+
+            <div style={{ borderTop:"1px dashed var(--line)", margin:"10px 0 12px" }} />
+            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 16, fontWeight: 800, marginBottom: 8, color: "#9a3412" }}>⚠️ Straf / ecoins afpakken</div>
+            <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
+              <label className="fl">Aantal ecoins om af te pakken</label>
+              <input className="fi" inputMode="numeric" value={penaltyValue(c)} onChange={e => setPenaltyDrafts(s => ({ ...s, [c.id]: e.target.value.replace(/\D/g, "") }))} placeholder="1" />
+            </div>
+            <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
+              <label className="fl">Reden</label>
+              <input className="fi" value={penaltyReasonValue(c)} onChange={e => setPenaltyReasons(s => ({ ...s, [c.id]: e.target.value }))} placeholder="Bijv. ongeoorloofd gedrag" />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <button
+                className="btn bsm"
+                style={{ flex: 1, background:"#fff7ed", color:"#9a3412", border:"2px solid #fdba74" }}
+                onClick={async () => {
+                  await db.takeCoins(c.id, penaltyValue(c), penaltyReasonValue(c));
+                  setPenaltyDrafts(s => ({ ...s, [c.id]: "" }));
+                  setPenaltyReasons(s => ({ ...s, [c.id]: "" }));
+                }}
+                disabled={!(Number(penaltyValue(c)) > 0) || !String(penaltyReasonValue(c) || "").trim()}
+              >➖ Ecoins afpakken</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#9a3412", marginBottom: 12 }}>Het kind ziet deze straf met reden terug in zijn geschiedenis.</div>
 
             <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delChild(c.id)}>Verwijder</button>
           </div>
@@ -2728,30 +2824,33 @@ function PurchasesTab({ data, db, getChild }) {
     .filter(r => filter === "all" || r.childId === filter)
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const pendingList  = sorted.filter(r => r.status === "pending");
-  const restList     = sorted.filter(r => r.status !== "pending");
+  const pendingList  = sorted.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
+  const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r));
 
-  const statusLabel = (s) => {
-    if (s === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
-    if (s === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
+  const statusLabel = (r) => {
+    if (isPenaltyRedemption(r)) return <span style={{ background:"#fff7ed", color:"#9a3412", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
+    if (r.status === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
+    if (r.status === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
     return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
   };
 
   const RedemptionRow = ({ r }) => {
     const ch = getChild(r.childId);
+    const penalty = isPenaltyRedemption(r);
     return (
-      <div className="tr" style={{ background: r.status === "approved" ? "#f0fdf4" : r.status === "rejected" ? "#fff5f5" : "var(--sur2)", flexWrap:"wrap", gap:8 }}>
+      <div className="tr" style={{ background: penalty ? "#fff7ed" : r.status === "approved" ? "#f0fdf4" : r.status === "rejected" ? "#fff5f5" : "var(--sur2)", flexWrap:"wrap", gap:8 }}>
         <div style={{ fontSize:32 }}>{r.rewardEmoji}</div>
         <div style={{ flex:1, minWidth:120 }}>
-          <div style={{ fontWeight:800, fontSize:15 }}>{r.rewardTitle}</div>
+          <div style={{ fontWeight:800, fontSize:15 }}>{penalty ? "Ecoins afgepakt" : r.rewardTitle}</div>
           <div style={{ fontSize:12, color:"var(--t2)", display:"flex", gap:8, marginTop:2, flexWrap:"wrap" }}>
             {ch && <span>{ch.avatar} {ch.name}</span>}
             <span>📅 {r.date}</span>
           </div>
-          <div style={{ marginTop:5 }}>{statusLabel(r.status)}</div>
+          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
+          <div style={{ marginTop:5 }}>{statusLabel(r)}</div>
         </div>
-        <div style={{ fontWeight:900, color:"var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>🪙 {r.cost}</div>
-        {r.status === "pending" && (
+        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`}</div>
+        {!penalty && r.status === "pending" && (
           <div style={{ display:"flex", gap:6 }}>
             <button className="btn bg bsm" onClick={() => db.approveRedemption(r.id)}>✅ Goedkeuren</button>
             <button className="btn bsm" style={{ background:"var(--red-l)", color:"var(--red)", border:"none" }} onClick={() => db.rejectRedemption(r.id)}>❌ Afwijzen</button>
@@ -2763,7 +2862,7 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div className="sh"><span className="st">Aankopen 🛍️</span></div>
+      <div className="sh"><span className="st">Aankopen & straffen 🛍️⚠️</span></div>
 
       {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
