@@ -2915,7 +2915,7 @@ function AddRewardModal({ close, db, children }) {
   const go = () => {
     if (title.trim()) {
       const targetChildIds = targetChildId === ALL_CHILDREN_VALUE ? [] : [targetChildId];
-      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds }), cost: +cost, emoji });
+      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds }), cost: Math.max(1, Number(cost) || 1), emoji });
       close();
     }
   };
@@ -3003,12 +3003,35 @@ function AddRewardModal({ close, db, children }) {
 
         <div className="fg">
           <label className="fl">🪙 Kosten: <strong>{cost}</strong></label>
-          <input type="range" min="1" max="200" step="1" value={cost}
-            onChange={e => setCost(e.target.value)}
-            style={{ width:"100%", accentColor:"var(--pri)", cursor:"pointer" }}
-          />
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 92px", gap:10, alignItems:"center" }}>
+            <input
+              type="range"
+              min="1"
+              max="200"
+              step="1"
+              value={cost}
+              onChange={e => setCost(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+              style={{ width:"100%", accentColor:"var(--pri)", cursor:"pointer" }}
+            />
+            <input
+              className="fi"
+              type="number"
+              min="1"
+              max="200"
+              step="1"
+              value={cost}
+              onChange={e => {
+                const raw = e.target.value;
+                if (raw === "") return setCost("");
+                setCost(Math.max(1, Math.min(200, Number(raw) || 1)));
+              }}
+              onBlur={() => setCost(Math.max(1, Math.min(200, Number(cost) || 1)))}
+              placeholder="1"
+              style={{ textAlign:"center", fontWeight:800 }}
+            />
+          </div>
           <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"var(--t2)" }}>
-            <span>5</span><span>50</span><span>100</span><span>200</span>
+            <span>1</span><span>50</span><span>100</span><span>150</span><span>200</span>
           </div>
         </div>
 
