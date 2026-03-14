@@ -74,7 +74,7 @@ async function fetchCloudSettings() {
     const parsed = JSON.parse(raw);
     return {
       parentPin: /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null,
-      levelThresholds: normalizeLevelThresholds(parsed?.levelThresholds),
+      levelThresholds: Array.isArray(parsed?.levelThresholds) ? normalizeLevelThresholds(parsed.levelThresholds) : null,
     };
   } catch {
     return {};
@@ -1833,7 +1833,7 @@ export default function App() {
 
         const settings = settingsRes.status === "fulfilled" ? (settingsRes.value || {}) : {};
         const nextParentPin = /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : getStoredParentPin();
-        const nextThresholds = normalizeLevelThresholds(settings.levelThresholds || getStoredLevelThresholds());
+        const nextThresholds = Array.isArray(settings.levelThresholds) ? normalizeLevelThresholds(settings.levelThresholds) : getStoredLevelThresholds();
         setParentPin(nextParentPin);
         setStoredParentPin(nextParentPin);
         setLevelThresholds(nextThresholds);
@@ -2047,10 +2047,13 @@ export default function App() {
     },
     updateLevelThresholds: async (thresholds) => {
       const normalized = normalizeLevelThresholds(thresholds);
-      await saveCloudSettings({ levelThresholds: normalized });
       setStoredLevelThresholds(normalized);
       setLevelThresholds(normalized);
-      reload();
+      try {
+        await saveCloudSettings({ levelThresholds: normalized });
+      } catch (err) {
+        console.error("Levelvereisten opslaan mislukt", err);
+      }
     },
     delChild: async (id) => {
       await dbDelChild(id);
