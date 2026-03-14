@@ -1325,6 +1325,66 @@ function PinScreen({ child, theme: th, onSuccess, onCancel }) {
   );
 }
 
+
+function ParentPinOverlay({ expectedPin, onSuccess, onCancel }) {
+  const [entered, setEntered] = useState("");
+  const [wrong, setWrong] = useState(false);
+  const [error, setError] = useState("");
+  const PIN_LEN = 6;
+
+  const press = (digit) => {
+    if (entered.length >= PIN_LEN) return;
+    const next = entered + digit;
+    setEntered(next);
+    setWrong(false);
+    setError("");
+    if (next.length === PIN_LEN) {
+      setTimeout(() => {
+        if (next === String(expectedPin || "")) {
+          onSuccess();
+        } else {
+          setWrong(true);
+          setError("Oeps! Dat is niet de juiste oudercode 🙈");
+          setTimeout(() => { setEntered(""); setWrong(false); }, 700);
+        }
+      }, 120);
+    }
+  };
+
+  const del = () => { setEntered(e => e.slice(0,-1)); setWrong(false); setError(""); };
+  const KEYS = ["1","2","3","4","5","6","7","8","9"];
+
+  return (
+    <div className="pin-overlay" onClick={onCancel}>
+      <div className="pin-card" style={{ "--pin-pri": "#6c63ff", "--pin-l": "#ede9fe" }} onClick={e => e.stopPropagation()}>
+        <span className="pin-avatar">🔑</span>
+        <div className="pin-title" style={{ color: "#6c63ff" }}>Ouder login</div>
+        <div className="pin-sub">Voer de 6-cijferige oudercode in</div>
+
+        <div className="pin-dots">
+          {Array.from({ length: PIN_LEN }).map((_, i) => (
+            <div key={i} className={`pin-dot ${i < entered.length ? (wrong ? "wrong" : "filled") : ""}`}
+              style={i < entered.length && !wrong ? { "--pin-pri": "#6c63ff" } : {}} />
+          ))}
+        </div>
+
+        <div className="pin-error">{error}</div>
+
+        <div className="pin-grid">
+          {KEYS.map(k => (
+            <button key={k} className="pin-btn" onClick={() => press(k)}>{k}</button>
+          ))}
+          <div />
+          <button className="pin-btn zero" onClick={() => press("0")}>0</button>
+          <button className="pin-del" onClick={del}>⌫</button>
+        </div>
+
+        <button className="pin-cancel" onClick={onCancel}>← Terug</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── FEEST OVERLAY ────────────────────────────────────────────────────────────
 const CONFETTI_COLORS = ["#6c63ff","#f59e0b","#10b981","#ef4444","#ec4899","#3b82f6","#fff","#ffd700"];
 const FEEST_MESSAGES = [
