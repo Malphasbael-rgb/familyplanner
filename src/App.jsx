@@ -118,6 +118,53 @@ function getTaskDaysLeft(task, referenceDate = today) {
   return Math.max(0, info.durationDays - elapsedDays);
 }
 
+const REWARD_META_OPEN = "[[FPREWARD]]";
+const REWARD_META_CLOSE = "[[/FPREWARD]]";
+
+function encodeRewardDesc(visibleDesc, meta = {}) {
+  const cleanDesc = (visibleDesc || "").trim();
+  const targetChildIds = Array.isArray(meta.targetChildIds) ? meta.targetChildIds.filter(Boolean) : [];
+  const payload = { targetChildIds };
+  const metaBlock = `${REWARD_META_OPEN}${JSON.stringify(payload)}${REWARD_META_CLOSE}`;
+  return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
+}
+
+function parseRewardDesc(rawDesc = "") {
+  const fullDesc = String(rawDesc || "");
+  const start = fullDesc.indexOf(REWARD_META_OPEN);
+  const end = fullDesc.indexOf(REWARD_META_CLOSE);
+  let visibleDesc = fullDesc;
+  let meta = {};
+
+  if (start !== -1 && end !== -1 && end > start) {
+    const jsonPart = fullDesc.slice(start + REWARD_META_OPEN.length, end);
+    visibleDesc = `${fullDesc.slice(0, start)}${fullDesc.slice(end + REWARD_META_CLOSE.length)}`.trim();
+    try {
+      meta = JSON.parse(jsonPart);
+    } catch {
+      meta = {};
+    }
+  }
+
+  const targetChildIds = Array.isArray(meta.targetChildIds) ? meta.targetChildIds.filter(Boolean) : [];
+  return { visibleDesc, targetChildIds };
+}
+
+function rewardVisibleForChild(reward, childId) {
+  const info = parseRewardDesc(reward?.desc || "");
+  return info.targetChildIds.length === 0 || info.targetChildIds.includes(childId);
+}
+
+function getRewardTargetLabel(reward, children = []) {
+  const info = parseRewardDesc(reward?.desc || "");
+  if (info.targetChildIds.length === 0) return "Alle kinderen";
+  const names = info.targetChildIds
+    .map(id => children.find(c => c.id === id))
+    .filter(Boolean)
+    .map(c => `${c.avatar} ${c.name}`);
+  return names.length ? names.join(" · ") : "Specifieke kinderen";
+}
+
 const DAGEN   = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
 const MAANDEN = ["januari","februari","maart","april","mei","juni","juli","augustus","september","oktober","november","december"];
 const AVATARS = ["👧","👦","🧒","🦊","🐱","🐶","🐸","🦄","🐻","🐼","🐯","🐨"];
@@ -1641,6 +1688,7 @@ export default function App() {
       const r = data.rewards.find(x => x.id === rewardId);
       const c = data.children.find(x => x.id === childId);
       if (!r || !c) return;
+      if (!rewardVisibleForChild(r, childId)) return;
       const reserved = data.redemptions
         .filter(x => x.childId === childId && x.status === 'pending')
         .reduce((s, x) => s + x.cost, 0);
@@ -2303,7 +2351,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                   {reserved > 0 && <span style={{ color:"#f59e0b", fontWeight:700 }}> · {reserved} gereserveerd · <strong style={{ color: th.pri }}>{available} beschikbaar</strong></span>}
                 </div>
                 <div className="ga">
-                  {data.rewards.map(r => {
+                  {data.rewards.filter(r => rewardVisibleForChild(r, cur.id)).map(r => {
+                    const rewardMeta = parseRewardDesc(r.desc);
                     const can = available >= r.cost;
                     return (
                       <div key={r.id}
@@ -2312,7 +2361,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                         onClick={() => { if (can) { db.redeem(cur.id, r.id); playSpend(); } }}>
                         <div style={{ fontSize: 44, marginBottom: 8 }}>{r.emoji}</div>
                         <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 3 }}>{r.title}</div>
-                        <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 9 }}>{r.desc}</div>
+                        <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 9 }}>{rewardMeta.visibleDesc}</div>
                         <div style={{ fontSize: 19, fontWeight: 900, color: "var(--yel)" }}>🪙 {r.cost}</div>
                         {can
                           ? <button className="btn bsm" style={{ marginTop: 10, background: th.hdr, color: "#fff", border: "none", boxShadow: `0 3px 12px ${th.pri}44` }}>Aanvragen! {th.rewardIcon}</button>
@@ -2321,7 +2370,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                       </div>
                     );
                   })}
-                  {data.rewards.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">{th.rewardIcon}</div><div className="et">Nog geen beloningen</div></div>}
+                  {data.rewards.filter(r => rewardVisibleForChild(r, cur.id)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">{th.rewardIcon}</div><div className="et">Nog geen beloningen voor jou</div></div>}
                 </div>
               </>
             );
@@ -2635,15 +2684,18 @@ function RewardsTab({ data, db, setModal }) {
         <button className="btn bp" onClick={() => setModal({ type: "reward" })}>+ Beloning</button>
       </div>
       <div className="ga">
-        {data.rewards.map(r => (
+        {data.rewards.map(r => {
+          const rewardMeta = parseRewardDesc(r.desc);
+          return (
           <div key={r.id} className="card" style={{ textAlign: "center" }}>
             <div style={{ fontSize: 44, marginBottom: 7 }}>{r.emoji}</div>
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 3 }}>{r.title}</div>
-            <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 9 }}>{r.desc}</div>
+            <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 6 }}>{rewardMeta.visibleDesc}</div>
+            <div style={{ fontSize: 11, color: "var(--pri)", fontWeight: 800, marginBottom: 9 }}>🎯 {getRewardTargetLabel(r, data.children)}</div>
             <div style={{ fontSize: 19, fontWeight: 900, color: "var(--yel)", marginBottom: 12 }}>🪙 {r.cost}</div>
             <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delReward(r.id)}>Verwijder</button>
           </div>
-        ))}
+        )})}
         {data.rewards.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎁</div><div className="et">Nog geen beloningen</div></div>}
       </div>
     </div>
@@ -2734,7 +2786,7 @@ function Modal({ modal, setModal, data, db }) {
   const close = () => setModal(null);
   if (modal.type === "child")  return <AddChildModal  close={close} db={db} />;
   if (modal.type === "task")   return <AddTaskModal   close={close} db={db} children={data.children} />;
-  if (modal.type === "reward") return <AddRewardModal close={close} db={db} />;
+  if (modal.type === "reward") return <AddRewardModal close={close} db={db} children={data.children} />;
   return null;
 }
 
@@ -2840,12 +2892,14 @@ function AddTaskModal({ close, db, children }) {
   );
 }
 
-function AddRewardModal({ close, db }) {
+function AddRewardModal({ close, db, children }) {
   const [title,      setTitle]      = useState("");
   const [desc,       setDesc]       = useState("");
   const [cost,       setCost]       = useState(20);
   const [emoji,      setEmoji]      = useState("🎁");
   const [emojiPicked,setEmojiPicked]= useState(false); // gebruiker heeft handmatig gekozen
+  const ALL_CHILDREN_VALUE = "__reward_all_children__";
+  const [targetChildId, setTargetChildId] = useState(ALL_CHILDREN_VALUE);
 
   // Live emoji suggesties op basis van naam
   const suggestions = searchEmojis(title);
@@ -2859,7 +2913,11 @@ function AddRewardModal({ close, db }) {
   const pickEmoji = (e) => { setEmoji(e); setEmojiPicked(true); };
 
   const go = () => {
-    if (title.trim()) { db.addReward({ title: title.trim(), desc, cost: +cost, emoji }); close(); }
+    if (title.trim()) {
+      const targetChildIds = targetChildId === ALL_CHILDREN_VALUE ? [] : [targetChildId];
+      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds }), cost: +cost, emoji });
+      close();
+    }
   };
 
   return (
@@ -2930,6 +2988,17 @@ function AddRewardModal({ close, db }) {
         <div className="fg">
           <label className="fl">Omschrijving (optioneel)</label>
           <input className="fi" value={desc} onChange={e => setDesc(e.target.value)} placeholder="bv. Eén bolletje ijs" />
+        </div>
+
+        <div className="fg">
+          <label className="fl">Voor welk kind is deze beloning?</label>
+          <select className="fs" value={targetChildId} onChange={e => setTargetChildId(e.target.value)}>
+            <option value={ALL_CHILDREN_VALUE}>👦👧 Alle kinderen</option>
+            {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
+          </select>
+          <div style={{ fontSize:12, color:"var(--t2)", marginTop:6 }}>
+            {targetChildId === ALL_CHILDREN_VALUE ? "Deze beloning is zichtbaar voor alle kinderen." : "Deze beloning is alleen zichtbaar voor het gekozen kind."}
+          </div>
         </div>
 
         <div className="fg">
