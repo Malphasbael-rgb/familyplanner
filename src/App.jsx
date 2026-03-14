@@ -283,16 +283,29 @@ function getRecurringLabel(task) {
   return "Eenmalig";
 }
 
-function getRecurringOccurrenceDate(templateTask, referenceDate = getTodayISO()) {
-  if (!isRecurringTemplateTask(templateTask)) return null;
+function getRecurringPlannedDates(templateTask) {
+  if (!isRecurringTemplateTask(templateTask) || !templateTask?.date) return [];
   const info = parseTaskDesc(templateTask.desc, templateTask.coins);
-  if (!templateTask.date || templateTask.date > referenceDate) return null;
-  if (info.recurrenceType === "daily") return referenceDate;
-  if (info.recurrenceType === "weekly") {
-    const daysBetween = diffDays(templateTask.date, referenceDate);
-    return daysBetween >= 0 && daysBetween % 7 === 0 ? referenceDate : null;
+  const start = new Date(`${templateTask.date}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return [];
+
+  if (info.recurrenceType === "daily") {
+    return Array.from({ length: 14 }, (_, idx) => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + idx);
+      return d.toISOString().split("T")[0];
+    });
   }
-  return null;
+
+  if (info.recurrenceType === "weekly") {
+    return Array.from({ length: 4 }, (_, idx) => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + (idx * 7));
+      return d.toISOString().split("T")[0];
+    });
+  }
+
+  return [];
 }
 
 const REWARD_META_OPEN = "[[FPREWARD]]";
@@ -1982,43 +1995,61 @@ export default function App() {
     const templates = data.tasks.filter(isRecurringTemplateTask);
     if (!templates.length) return;
 
-    const referenceDate = getTodayISO();
     let changed = false;
 
     for (const template of templates) {
-      const occurrenceDate = getRecurringOccurrenceDate(template, referenceDate);
-      if (!occurrenceDate) continue;
       const info = parseTaskDesc(template.desc, template.coins);
-      const alreadyExists = data.tasks.some((task) => {
-        if (task.id === template.id) return false;
-        const taskInfo = parseTaskDesc(task.desc, task.coins);
-        return !isRecurringTemplateTask(task)
-          && task.childId === template.childId
-          && task.date === occurrenceDate
-          && taskInfo.recurrenceSourceId === template.id;
-      });
-      if (alreadyExists) continue;
+      const plannedDates = getRecurringPlannedDates(template);
+      if (!plannedDates.length) continue;
 
-      await dbAddTask({
-        id: genId(),
-        childId: template.childId,
-        title: template.title,
-        description: encodeTaskDesc(info.visibleDesc, {
-          maxCoins: info.maxCoins,
-          durationDays: info.durationDays,
-          recurrenceType: info.recurrenceType,
-          recurrenceSourceId: template.id,
-          isTemplate: false,
-          autoApprove: info.autoApprove,
-          dayPart: info.dayPart,
-          doneOn: null,
-          approvedOn: null,
-        }),
-        coins: info.maxCoins,
-        date: occurrenceDate,
-        status: 'pending',
+      const generated = data.tasks.filter((task) => {
+        if (task.id === template.id || isRecurringTemplateTask(task)) return false;
+        const taskInfo = parseTaskDesc(task.desc, task.coins);
+        return task.childId === template.childId && taskInfo.recurrenceSourceId === template.id;
       });
-      changed = true;
+
+      const byDate = new Map();
+      for (const task of generated) {
+        const list = byDate.get(task.date) || [];
+        list.push(task);
+        byDate.set(task.date, list);
+      }
+
+      for (const [dateKey, list] of byDate.entries()) {
+        if (list.length <= 1) continue;
+        const extras = list.slice(1);
+        for (const dupe of extras) {
+          await dbDelTask(dupe.id);
+          changed = true;
+        }
+        byDate.set(dateKey, [list[0]]);
+      }
+
+      for (const occurrenceDate of plannedDates) {
+        const existingForDate = byDate.get(occurrenceDate) || [];
+        if (existingForDate.length) continue;
+
+        await dbAddTask({
+          id: genId(),
+          childId: template.childId,
+          title: template.title,
+          description: encodeTaskDesc(info.visibleDesc, {
+            maxCoins: info.maxCoins,
+            durationDays: info.durationDays,
+            recurrenceType: info.recurrenceType,
+            recurrenceSourceId: template.id,
+            isTemplate: false,
+            autoApprove: info.autoApprove,
+            dayPart: info.dayPart,
+            doneOn: null,
+            approvedOn: null,
+          }),
+          coins: info.maxCoins,
+          date: occurrenceDate,
+          status: 'pending',
+        });
+        changed = true;
+      }
     }
 
     if (changed) reload();
@@ -3833,7 +3864,7 @@ function AddTaskModal({ close, db, children }) {
                   <option value="weekly">Wekelijks terugkerend</option>
                 </select>
                 <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                  {recurrenceType === "none" ? "De taak wordt één keer aangemaakt op de gekozen startdag." : recurrenceType === "daily" ? "De tool maakt elke dag automatisch één nieuwe losse taak voor die dag." : "De tool maakt alleen op de volgende passende weekdag een nieuwe losse taak aan."}
+                  {recurrenceType === "none" ? "De taak wordt één keer aangemaakt op de gekozen startdag." : recurrenceType === "daily" ? "De tool plant vanaf de startdatum meteen 14 losse dagtaken vooruit." : "De tool plant vanaf de startdatum meteen 4 losse weektaken vooruit."}
                 </div>
               </div>
               <div className="fg"><label className="fl">Beschikbaar in dagen</label>
@@ -3883,8 +3914,8 @@ function AddTaskModal({ close, db, children }) {
               {recurrenceType === "none"
                 ? <>Start op <strong>{date}</strong> · zichtbaar vanaf de startdag · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
                 : recurrenceType === "daily"
-                  ? <>Dit wordt een <strong>dagelijks taaksjabloon</strong>. Kinderen zien telkens alleen de losse taak van de actuele dag, niet alle toekomstige dagen vooruit.</>
-                  : <>Dit wordt een <strong>wekelijks taaksjabloon</strong>. De losse taak verschijnt alleen op de passende weekdag vanaf <strong>{date}</strong>.</>}
+                  ? <>Dit wordt een <strong>dagelijks taaksjabloon</strong>. De planner maakt vanaf de startdatum meteen 14 losse dagtaken aan, maar kinderen zien per dag alleen de taak van die dag.</>
+                  : <>Dit wordt een <strong>wekelijks taaksjabloon</strong>. De planner maakt vanaf de startdatum meteen 4 losse weektaken aan, maar kinderen zien pas de taak van de juiste weekdag.</>}
             </div>
           </>
         )}
