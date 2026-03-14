@@ -172,6 +172,7 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     recurrenceType: ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none",
     isTemplate: !!meta.isTemplate,
     recurrenceSourceId: typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null,
+    autoApprove: !!meta.autoApprove,
     dayPart: normalizeDayPart(meta.dayPart),
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
@@ -204,9 +205,10 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const recurrenceType = ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none";
   const isTemplate = !!meta.isTemplate;
   const recurrenceSourceId = typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null;
+  const autoApprove = !!meta.autoApprove;
   const dayPart = normalizeDayPart(meta.dayPart);
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, autoApprove, dayPart };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -219,6 +221,7 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     recurrenceType: Object.prototype.hasOwnProperty.call(patch, "recurrenceType") ? patch.recurrenceType : info.recurrenceType,
     isTemplate: Object.prototype.hasOwnProperty.call(patch, "isTemplate") ? patch.isTemplate : info.isTemplate,
     recurrenceSourceId: Object.prototype.hasOwnProperty.call(patch, "recurrenceSourceId") ? patch.recurrenceSourceId : info.recurrenceSourceId,
+    autoApprove: Object.prototype.hasOwnProperty.call(patch, "autoApprove") ? patch.autoApprove : info.autoApprove,
     dayPart: Object.prototype.hasOwnProperty.call(patch, "dayPart") ? patch.dayPart : info.dayPart,
   });
 }
@@ -2006,6 +2009,7 @@ export default function App() {
           recurrenceType: info.recurrenceType,
           recurrenceSourceId: template.id,
           isTemplate: false,
+          autoApprove: info.autoApprove,
           dayPart: info.dayPart,
           doneOn: null,
           approvedOn: null,
@@ -2181,8 +2185,20 @@ export default function App() {
     markDone: async (id) => {
       const task = data.tasks.find(t => t.id === id);
       if (!task) return;
-      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: getTodayISO(), approvedOn: null });
-      await supabase.from('tasks').update({ status: 'done', description }).eq('id', id);
+      const info = parseTaskDesc(task.desc, task.coins);
+      const todayIso = getTodayISO();
+      const shouldAutoApprove = info.recurrenceType !== "none" && !!info.autoApprove;
+      const nextStatus = shouldAutoApprove ? 'approved' : 'done';
+      const description = updateTaskDescMeta(task.desc, task.coins, {
+        doneOn: todayIso,
+        approvedOn: shouldAutoApprove ? todayIso : null,
+        autoApprove: info.autoApprove,
+      });
+      await supabase.from('tasks').update({ status: nextStatus, description }).eq('id', id);
+      if (shouldAutoApprove) {
+        const child = data.children.find(c => c.id === task.childId);
+        if (child) await dbUpdateChildCoins(child.id, child.coins + task.coins);
+      }
       reload();
     },
     approve: async (id) => {
@@ -3750,6 +3766,7 @@ function AddTaskModal({ close, db, children }) {
   const [date, setDate] = useState(today);
   const [durationDays, setDurationDays] = useState(3);
   const [recurrenceType, setRecurrenceType] = useState("none");
+  const [autoApproveRecurring, setAutoApproveRecurring] = useState(false);
   const [dayPart, setDayPart] = useState("allDay");
   const BOTH_CHILDREN_VALUE = "__all_children__";
 
@@ -3763,6 +3780,7 @@ function AddTaskModal({ close, db, children }) {
         durationDays: +durationDays,
         recurrenceType,
         isTemplate: recurrenceType !== "none",
+        autoApprove: recurrenceType !== "none" ? autoApproveRecurring : false,
         dayPart,
       }),
       coins: +coins,
@@ -3822,6 +3840,20 @@ function AddTaskModal({ close, db, children }) {
                 <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
               </div>
             </div>
+            {recurrenceType !== "none" && (
+              <div className="fg">
+                <label className="fl">Goedkeuring voor terugkerende taak</label>
+                <select className="fs" value={autoApproveRecurring ? "auto" : "manual"} onChange={e => setAutoApproveRecurring(e.target.value === "auto")}>
+                  <option value="manual">Handmatig door ouder</option>
+                  <option value="auto">Automatisch goedkeuren bij afvinken door kind</option>
+                </select>
+                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
+                  {autoApproveRecurring
+                    ? "Het kind krijgt de ecoins direct zodra het de taak afvinkt. De taak komt niet meer in de ouder-goedkeuringslijst."
+                    : "Het kind vinkt de taak af en daarna moet een ouder hem nog goedkeuren voordat de ecoins worden toegekend."}
+                </div>
+              </div>
+            )}
             <div className="fg"><label className="fl">Dagdeel voor kinderen</label>
               <select className="fs" value={dayPart} onChange={e => setDayPart(e.target.value)}>
                 <option value="allDay">🗓️ Hele dag</option>
