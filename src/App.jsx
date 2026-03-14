@@ -54,6 +54,20 @@ const setStoredParentPin = (pin) => {
 };
 const normalizeDayPart = (value) => DAY_PART_INFO[value] ? value : "allDay";
 const getDayPartInfo = (value) => DAY_PART_INFO[normalizeDayPart(value)];
+
+const getCurrentMinutes = () => {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+};
+const isDayPartVisibleNow = (dayPart) => {
+  const part = normalizeDayPart(dayPart);
+  const minutes = getCurrentMinutes();
+  if (part === "allDay") return true;
+  if (part === "morning") return minutes >= 6 * 60;
+  if (part === "afternoon") return minutes >= 12 * 60;
+  if (part === "evening") return minutes >= 17 * 60;
+  return true;
+};
 const normalizeLevelThresholds = (input) => {
   const base = Array.isArray(input) ? input : DEFAULT_LEVEL_THRESHOLDS;
   const nums = base
@@ -2772,12 +2786,16 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, levelThresholds }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
-  const todayTasks = data.tasks.filter(t =>
+  const allTodayTasks = data.tasks.filter(t =>
     t.childId === activeKid &&
     t.date === todayNow &&
     getTaskRemainingCoins(t, todayNow) > 0 &&
     shouldKeepCompletedVisible(t, todayNow)
   );
+  const todayTasks = allTodayTasks.filter((t) => {
+    const meta = parseTaskDesc(t.desc, t.coins);
+    return isDayPartVisibleNow(meta.dayPart);
+  });
   const missedTasks = data.tasks
     .filter(t =>
       t.childId === activeKid &&
@@ -2788,7 +2806,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     .sort((a, b) => a.date.localeCompare(b.date));
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
-  const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
+  const allDone = allTodayTasks.length > 0 && allTodayTasks.every(t => t.status !== "pending");
   const stats = buildChildStats(data, activeKid, todayNow, levelThresholds);
   const myGoals = data.rewards.filter(r => isGoalReward(r) && rewardVisibleForChild(r, activeKid));
   const groupTasksByDayPart = (tasks) => DAY_PART_ORDER.map((key) => ({
