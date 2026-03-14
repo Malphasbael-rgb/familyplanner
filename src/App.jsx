@@ -20,6 +20,13 @@ const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
 const COMPLETED_HISTORY_DAYS = 14;
 const ACHIEVEMENT_SEEN_KEY = "familyplanner-achievement-seen-v1";
 const STREAK_MILESTONES = [3, 7, 14, 30];
+const DAY_PART_ORDER = ["allDay", "morning", "afternoon", "evening"];
+const DAY_PART_INFO = {
+  allDay: { emoji: "🗓️", label: "Hele dag" },
+  morning: { emoji: "🌅", label: "Ochtend" },
+  afternoon: { emoji: "☀️", label: "Middag" },
+  evening: { emoji: "🌙", label: "Avond" },
+};
 
 const getSeenAchievements = () => {
   try { return JSON.parse(localStorage.getItem(ACHIEVEMENT_SEEN_KEY) || "[]"); } catch { return []; }
@@ -45,6 +52,8 @@ const getStoredParentPin = () => {
 const setStoredParentPin = (pin) => {
   try { localStorage.setItem(PARENT_PIN_KEY, pin); } catch {}
 };
+const normalizeDayPart = (value) => DAY_PART_INFO[value] ? value : "allDay";
+const getDayPartInfo = (value) => DAY_PART_INFO[normalizeDayPart(value)];
 const normalizeLevelThresholds = (input) => {
   const base = Array.isArray(input) ? input : DEFAULT_LEVEL_THRESHOLDS;
   const nums = base
@@ -149,6 +158,7 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     recurrenceType: ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none",
     isTemplate: !!meta.isTemplate,
     recurrenceSourceId: typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null,
+    dayPart: normalizeDayPart(meta.dayPart),
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -180,8 +190,9 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const recurrenceType = ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none";
   const isTemplate = !!meta.isTemplate;
   const recurrenceSourceId = typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null;
+  const dayPart = normalizeDayPart(meta.dayPart);
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -194,6 +205,7 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     recurrenceType: Object.prototype.hasOwnProperty.call(patch, "recurrenceType") ? patch.recurrenceType : info.recurrenceType,
     isTemplate: Object.prototype.hasOwnProperty.call(patch, "isTemplate") ? patch.isTemplate : info.isTemplate,
     recurrenceSourceId: Object.prototype.hasOwnProperty.call(patch, "recurrenceSourceId") ? patch.recurrenceSourceId : info.recurrenceSourceId,
+    dayPart: Object.prototype.hasOwnProperty.call(patch, "dayPart") ? patch.dayPart : info.dayPart,
   });
 }
 
@@ -1980,6 +1992,7 @@ export default function App() {
           recurrenceType: info.recurrenceType,
           recurrenceSourceId: template.id,
           isTemplate: false,
+          dayPart: info.dayPart,
           doneOn: null,
           approvedOn: null,
         }),
@@ -2778,6 +2791,13 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
   const stats = buildChildStats(data, activeKid, todayNow, levelThresholds);
   const myGoals = data.rewards.filter(r => isGoalReward(r) && rewardVisibleForChild(r, activeKid));
+  const groupTasksByDayPart = (tasks) => DAY_PART_ORDER.map((key) => ({
+    key,
+    ...getDayPartInfo(key),
+    tasks: tasks.filter((t) => parseTaskDesc(t.desc, t.coins).dayPart === key),
+  })).filter((group) => group.tasks.length > 0);
+  const todayTaskGroups = groupTasksByDayPart(todayTasks);
+  const missedTaskGroups = groupTasksByDayPart(missedTasks);
 
   const [feitje]  = useState(() => FEITJES[Math.floor(Math.random() * FEITJES.length)]);
   const [coinPop, setCoinPop] = useState(false);
@@ -2910,8 +2930,16 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           <div className="st" style={{ marginBottom: 14, color: th.priD }}>Taken van vandaag {th.taskIcon}</div>
           {todayTasks.length === 0
             ? <div className="emp"><div className="ei">🎉</div><div className="et">Geen taken vandaag — vrij!</div></div>
-            : todayTasks.map(t => (
-                <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
+            : todayTaskGroups.map(group => (
+                <div key={group.key} style={{ marginBottom: 16 }}>
+                  <div className="card" style={{ padding: "10px 12px", marginBottom: 10, background: th.soft, borderColor: th.pri + "33" }}>
+                    <div style={{ fontWeight: 900, color: th.priD, fontSize: 15 }}>{group.emoji} {group.label}</div>
+                    <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 2 }}>Hier horen jouw {group.label.toLowerCase()}-taken bij.</div>
+                  </div>
+                  {group.tasks.map(t => (
+                    <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
+                  ))}
+                </div>
               ))
           }
         </div>
@@ -2925,8 +2953,16 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           </div>
           {missedTasks.length === 0
             ? <div className="emp"><div className="ei">😌</div><div className="et">Geen gemiste taken — netjes!</div></div>
-            : missedTasks.map(t => (
-                <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} isMissed />
+            : missedTaskGroups.map(group => (
+                <div key={group.key} style={{ marginBottom: 16 }}>
+                  <div className="card" style={{ padding: "10px 12px", marginBottom: 10, background: th.soft, borderColor: th.pri + "33" }}>
+                    <div style={{ fontWeight: 900, color: th.priD, fontSize: 15 }}>{group.emoji} {group.label}</div>
+                    <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 2 }}>Gemiste {group.label.toLowerCase()}-taken die nog niet verlopen zijn.</div>
+                  </div>
+                  {group.tasks.map(t => (
+                    <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} isMissed />
+                  ))}
+                </div>
               ))
           }
         </div>
@@ -3041,6 +3077,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const isNevah = childName === "Nevah";
   const taskMeta = parseTaskDesc(task.desc, task.coins);
   const daysLeft = getTaskDaysLeft(task, today);
+  const dayPartInfo = getDayPartInfo(taskMeta.dayPart);
 
   const handleCheck = () => {
     if (done || appr) return;
@@ -3079,7 +3116,10 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340" }}>{task.title}</div>
-        {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+          <span className="bd" style={{ background: th.soft, color: th.priD }}>{dayPartInfo.emoji} {dayPartInfo.label}</span>
+          {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
+        </div>
         {!done && !appr && (
           <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
             📅 Startdatum {task.date} · ⏳ Nog {daysLeft} dag{daysLeft === 1 ? "" : "en"} over
@@ -3205,6 +3245,7 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 start {t.date}</span>
+                  <span>{getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).emoji} {getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).label}</span>
                   <span>⏳ {parseTaskDesc(t.desc, t.coins).durationDays} dag(en)</span>
                   {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
                 </div>
@@ -3230,6 +3271,7 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
+                  <span>{getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).emoji} {getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).label}</span>
                   {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
                 </div>
               </div>
@@ -3690,6 +3732,7 @@ function AddTaskModal({ close, db, children }) {
   const [date, setDate] = useState(today);
   const [durationDays, setDurationDays] = useState(3);
   const [recurrenceType, setRecurrenceType] = useState("none");
+  const [dayPart, setDayPart] = useState("allDay");
   const BOTH_CHILDREN_VALUE = "__all_children__";
 
   const go = async () => {
@@ -3702,6 +3745,7 @@ function AddTaskModal({ close, db, children }) {
         durationDays: +durationDays,
         recurrenceType,
         isTemplate: recurrenceType !== "none",
+        dayPart,
       }),
       coins: +coins,
       date,
@@ -3758,6 +3802,17 @@ function AddTaskModal({ close, db, children }) {
               </div>
               <div className="fg"><label className="fl">Beschikbaar in dagen</label>
                 <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
+              </div>
+            </div>
+            <div className="fg"><label className="fl">Dagdeel voor kinderen</label>
+              <select className="fs" value={dayPart} onChange={e => setDayPart(e.target.value)}>
+                <option value="allDay">🗓️ Hele dag</option>
+                <option value="morning">🌅 Ochtend</option>
+                <option value="afternoon">☀️ Middag</option>
+                <option value="evening">🌙 Avond</option>
+              </select>
+              <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
+                Kinderen zien hun taken straks overzichtelijk per dagdeel met passende emoji's.
               </div>
             </div>
             <div className="fg">
