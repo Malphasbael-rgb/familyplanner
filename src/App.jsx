@@ -2895,7 +2895,7 @@ function AddTaskModal({ close, db, children }) {
 function AddRewardModal({ close, db, children }) {
   const [title,      setTitle]      = useState("");
   const [desc,       setDesc]       = useState("");
-  const [cost,       setCost]       = useState(20);
+  const [cost,       setCost]       = useState(1);
   const [emoji,      setEmoji]      = useState("🎁");
   const [emojiPicked,setEmojiPicked]= useState(false); // gebruiker heeft handmatig gekozen
   const ALL_CHILDREN_VALUE = "__reward_all_children__";
@@ -3003,7 +3003,7 @@ function AddRewardModal({ close, db, children }) {
 
         <div className="fg">
           <label className="fl">🪙 Kosten: <strong>{cost}</strong></label>
-          <input type="range" min="5" max="200" step="5" value={cost}
+          <input type="range" min="1" max="200" step="1" value={cost}
             onChange={e => setCost(e.target.value)}
             style={{ width:"100%", accentColor:"var(--pri)", cursor:"pointer" }}
           />
