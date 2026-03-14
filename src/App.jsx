@@ -9,6 +9,65 @@ import {
 
 const today = new Date().toISOString().split("T")[0];
 const genId = () => Math.random().toString(36).substr(2, 9);
+const PARENT_PIN_KEY = "familyplanner-parent-pin-v1";
+const DEFAULT_PARENT_PIN = "258000";
+const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
+const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
+const getStoredParentPin = () => {
+  try {
+    const pin = localStorage.getItem(PARENT_PIN_KEY);
+    return /^\d{6}$/.test(pin || "") ? pin : DEFAULT_PARENT_PIN;
+  } catch {
+    return DEFAULT_PARENT_PIN;
+  }
+};
+const setStoredParentPin = (pin) => {
+  try {
+    localStorage.setItem(PARENT_PIN_KEY, pin);
+  } catch {}
+};
+const isCloudSettingsReward = (r) => r?.id === CLOUD_SETTINGS_REWARD_ID || r?.title === CLOUD_SETTINGS_TITLE;
+const stripCloudSettingsFromData = (d) => ({
+  ...d,
+  rewards: Array.isArray(d?.rewards) ? d.rewards.filter(r => !isCloudSettingsReward(r)) : [],
+});
+async function fetchParentPinFromCloud() {
+  const res = await supabase
+    .from("rewards")
+    .select("id,title,description")
+    .eq("id", CLOUD_SETTINGS_REWARD_ID)
+    .maybeSingle();
+
+  if (res.error) throw new Error(`loadParentPin: ${res.error.message}`);
+
+  const raw = res.data?.description || "";
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    return /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveParentPinToCloud(pin) {
+  const payload = {
+    id: CLOUD_SETTINGS_REWARD_ID,
+    title: CLOUD_SETTINGS_TITLE,
+    description: JSON.stringify({ parentPin: pin }),
+    cost: 999999,
+    emoji: "🔐",
+  };
+
+  const res = await supabase
+    .from("rewards")
+    .upsert(payload, { onConflict: "id" })
+    .select("id")
+    .single();
+
+  if (res.error) throw new Error(`saveParentPin: ${res.error.message}`);
+}
 
 const DAGEN   = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
 const MAANDEN = ["januari","februari","maart","april","mei","juni","juli","augustus","september","oktober","november","december"];
@@ -1341,16 +1400,46 @@ export default function App() {
   const coinTargetRef = useRef(null);
   const [showFeest, setShowFeest] = useState(false);
   const [pinChild,  setPinChild]  = useState(null);
+  const [showParentPin, setShowParentPin] = useState(false);
+  const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
 
   // ── Laad data uit Supabase bij opstarten ──
   useEffect(() => {
-    loadAll()
-      .then(d => { setData(d); setLoading(false); })
-      .catch(err => { console.error('Laad fout:', err); setLoading(false); });
+    const localPin = getStoredParentPin();
+    setParentPin(localPin);
+
+    Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
+      .then(([dataRes, pinRes]) => {
+        if (dataRes.status === "fulfilled") {
+          setData(stripCloudSettingsFromData(dataRes.value));
+        } else {
+          console.error("Laad fout:", dataRes.reason);
+        }
+
+        if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
+          setParentPin(pinRes.value);
+          setStoredParentPin(pinRes.value);
+        } else if (pinRes.status === "rejected") {
+          console.error("Parent PIN cloud load fout:", pinRes.reason);
+        }
+
+        setLoading(false);
+      })
+      .catch(err => { console.error("Laad fout:", err); setLoading(false); });
   }, []);
 
   // ── Helper: herlaad alle data na een wijziging ──
-  const reload = () => loadAll().then(setData).catch(console.error);
+  const reload = () => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
+    .then(([dataRes, pinRes]) => {
+      if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
+      else console.error(dataRes.reason);
+
+      if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
+        setParentPin(pinRes.value);
+        setStoredParentPin(pinRes.value);
+      }
+    })
+    .catch(console.error);
 
   // ── Realtime: luister naar wijzigingen in de database ──
   // Zodra een ander apparaat iets wijzigt, wordt de data hier automatisch bijgewerkt
@@ -1370,6 +1459,25 @@ export default function App() {
     addChild: async (c) => {
       const id = genId();
       await dbAddChild({ id, coins: 0, ...c });
+      reload();
+    },
+    updateChildPin: async (id, pin) => {
+      await supabase.from('children').update({ pin }).eq('id', id);
+      reload();
+    },
+    setChildCoins: async (id, coins) => {
+      await dbUpdateChildCoins(id, Math.max(0, Number(coins) || 0));
+      reload();
+    },
+    resetAllCoins: async () => {
+      await Promise.all(data.children.map(c => dbUpdateChildCoins(c.id, 0)));
+      reload();
+    },
+    updateParentPin: async (pin) => {
+      if (!/^\d{6}$/.test(pin || "")) return;
+      await saveParentPinToCloud(pin);
+      setStoredParentPin(pin);
+      setParentPin(pin);
       reload();
     },
     delChild: async (id) => {
@@ -1486,7 +1594,7 @@ export default function App() {
       <style>{CSS}</style>
       <div className="app">
         {screen === "home" && (
-          <HomeScreen data={data} onSelectKid={openChildScreen} onParent={() => setScreen("parent")} playDrumroll={playDrumroll} />
+          <HomeScreen data={data} onSelectKid={openChildScreen} onParent={() => setShowParentPin(true)} playDrumroll={playDrumroll} />
         )}
 
         {screen === "child" && (
@@ -1516,7 +1624,7 @@ export default function App() {
               <button className="back-btn" onClick={goHome}>← Terug</button>
             </header>
             <main className="main">
-              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} />
+              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} />
             </main>
           </>
         )}
@@ -1538,6 +1646,14 @@ export default function App() {
         )}
 
         {modal && <Modal modal={modal} setModal={setModal} data={data} db={db} />}
+
+        {showParentPin && (
+          <ParentPinOverlay
+            expectedPin={parentPin}
+            onCancel={() => setShowParentPin(false)}
+            onSuccess={() => { setShowParentPin(false); setScreen("parent"); }}
+          />
+        )}
 
         {pinChild && (() => {
           const child = data.children.find(c => c.id === pinChild);
@@ -2153,7 +2269,7 @@ function KidTask({ task, db, playTaskDone, childName, theme }) {
 }
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
-function ParentView({ data, db, tab, setTab, setModal }) {
+function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
@@ -2187,6 +2303,7 @@ function ParentView({ data, db, tab, setTab, setModal }) {
           ["kids",    "👶 Kinderen"],
           ["rewards", "🎁 Beloningen"],
           ["purchases", `🛍️ Aankopen${pendingRedemptions.length ? ` (${pendingRedemptions.length})` : ""}`],
+          ["settings", "⚙️ Instellingen"],
         ].map(([k,l]) => (
           <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{l}</button>
         ))}
@@ -2196,6 +2313,7 @@ function ParentView({ data, db, tab, setTab, setModal }) {
       {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
       {tab === "rewards"   && <RewardsTab   data={data} db={db} setModal={setModal} />}
       {tab === "purchases" && <PurchasesTab data={data} db={db} getChild={getChild} />}
+      {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} />}
     </div>
   );
 }
@@ -2272,6 +2390,12 @@ function ApproveTab({ data, db, pending, getChild }) {
 }
 
 function KidsTab({ data, db, setModal }) {
+  const [pinDrafts, setPinDrafts] = useState({});
+  const [coinDrafts, setCoinDrafts] = useState({});
+
+  const pinValue = (child) => pinDrafts[child.id] ?? child.pin ?? "";
+  const coinValue = (child) => coinDrafts[child.id] ?? String(child.coins ?? 0);
+
   return (
     <div>
       <div className="sh">
@@ -2287,10 +2411,98 @@ function KidsTab({ data, db, setModal }) {
             <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>
               {data.tasks.filter(t => t.childId === c.id && t.status === "approved").length} taken voltooid
             </div>
+
+            <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
+              <label className="fl">Nieuwe kind-PIN (4 cijfers)</label>
+              <input
+                className="fi"
+                inputMode="numeric"
+                maxLength={4}
+                value={pinValue(c)}
+                onChange={e => setPinDrafts(s => ({ ...s, [c.id]: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                placeholder="1234"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button
+                className="btn bp bsm"
+                style={{ flex: 1 }}
+                onClick={() => db.updateChildPin(c.id, pinValue(c))}
+                disabled={!/^\d{4}$/.test(pinValue(c))}
+              >PIN opslaan</button>
+            </div>
+
+            <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
+              <label className="fl">Coins instellen</label>
+              <input
+                className="fi"
+                inputMode="numeric"
+                value={coinValue(c)}
+                onChange={e => setCoinDrafts(s => ({ ...s, [c.id]: e.target.value.replace(/\D/g, "") }))}
+                placeholder="0"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <button className="btn bg bsm" style={{ flex: 1 }} onClick={() => db.setChildCoins(c.id, coinValue(c))}>Coins opslaan</button>
+              <button
+                className="btn bh bsm"
+                style={{ flex: 1 }}
+                onClick={() => { setCoinDrafts(s => ({ ...s, [c.id]: "0" })); db.setChildCoins(c.id, 0); }}
+              >Reset coins</button>
+            </div>
+
             <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delChild(c.id)}>Verwijder</button>
           </div>
         ))}
         {data.children.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">👶</div><div className="et">Nog geen kinderen</div></div>}
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab({ data, db, parentPin }) {
+  const [pinDraft, setPinDraft] = useState(parentPin || DEFAULT_PARENT_PIN);
+
+  useEffect(() => {
+    setPinDraft(parentPin || DEFAULT_PARENT_PIN);
+  }, [parentPin]);
+
+  return (
+    <div>
+      <div className="sh">
+        <span className="st">Instellingen ⚙️</span>
+      </div>
+
+      <div className="g2">
+        <div className="card">
+          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🔐 Ouder login</div>
+          <div className="fg">
+            <label className="fl">Oudercode (6 cijfers)</label>
+            <input
+              className="fi"
+              inputMode="numeric"
+              maxLength={6}
+              value={pinDraft}
+              onChange={e => setPinDraft(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="258000"
+            />
+          </div>
+          <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>
+            Deze oudercode wordt nu via Supabase gedeeld tussen apparaten. Lokaal wordt alleen een reservekopie bewaard.
+          </div>
+          <button className="btn bp" onClick={() => db.updateParentPin(pinDraft)} disabled={!/^\d{6}$/.test(pinDraft)}>6-cijferige code opslaan</button>
+        </div>
+
+        <div className="card">
+          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🪙 Coins beheren</div>
+          <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 14 }}>
+            Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.
+          </div>
+          <button className="btn bh" style={{ color: "var(--red)" }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
+          <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 10 }}>
+            Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.
+          </div>
+        </div>
       </div>
     </div>
   );
