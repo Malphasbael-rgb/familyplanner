@@ -18,6 +18,21 @@ const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
 const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
 const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
 const COMPLETED_HISTORY_DAYS = 14;
+const ACHIEVEMENT_SEEN_KEY = "familyplanner-achievement-seen-v1";
+const STREAK_MILESTONES = [3, 7, 14, 30];
+
+const getSeenAchievements = () => {
+  try { return JSON.parse(localStorage.getItem(ACHIEVEMENT_SEEN_KEY) || "[]"); } catch { return []; }
+};
+const hasSeenAchievement = (id) => getSeenAchievements().includes(id);
+const markAchievementSeen = (id) => {
+  try {
+    const set = new Set(getSeenAchievements());
+    set.add(id);
+    localStorage.setItem(ACHIEVEMENT_SEEN_KEY, JSON.stringify([...set]));
+  } catch {}
+};
+
 
 const getStoredParentPin = () => {
   try {
@@ -1804,6 +1819,72 @@ function FeestOverlay({ childName, onClose }) {
   );
 }
 
+
+const ACHIEVEMENT_MESSAGES = {
+  level: [
+    { emoji: "⬆️🏆⬆️", title: "LEVEL UP!", getSub: (name, value) => `${name}, jij bent nu level ${value}! Wat een baas! ✨` },
+    { emoji: "👑🌟👑", title: "Nieuw level bereikt!", getSub: (name, value) => `${name}, level ${value} is binnen. Koningswerk!` },
+  ],
+  streak: [
+    { emoji: "🔥🎉🔥", title: "Streak behaald!", getSub: (name, value) => `${name}, jij hebt een streak van ${value} dagen!` },
+    { emoji: "⚡🏅⚡", title: "Wat een reeks!", getSub: (name, value) => `${value} dagen streak voor ${name}. Lekker bezig!` },
+  ],
+};
+
+function AchievementOverlay({ event, onClose }) {
+  const pool = ACHIEVEMENT_MESSAGES[event?.type] || ACHIEVEMENT_MESSAGES.level;
+  const msg = pool[Math.abs(String(event?.id || 'x').split('').reduce((a,c)=>a+c.charCodeAt(0),0)) % pool.length];
+  const pieces = Array.from({ length: 80 }, (_, i) => ({
+    id: i,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    left: Math.random() * 100,
+    dur:  2.2 + Math.random() * 1.6,
+    delay: Math.random() * 0.9,
+    x: (Math.random() - 0.5) * 360,
+    rot: Math.random() * 1080 - 540,
+    wide: Math.random() > 0.4,
+  }));
+
+  if (!event) return null;
+
+  return (
+    <>
+      <div className="feest-confetti">
+        {pieces.map(p => (
+          <div key={p.id} className="confetti-piece" style={{
+            left: `${p.left}%`,
+            background: p.color,
+            width: p.wide ? 15 : 8,
+            height: p.wide ? 15 : 18,
+            borderRadius: p.wide ? "50%" : 3,
+            "--cf-dur":   `${p.dur}s`,
+            "--cf-delay": `${p.delay}s`,
+            "--cf-x":     `${p.x}px`,
+            "--cf-rot":   `${p.rot}deg`,
+          }} />
+        ))}
+      </div>
+      <div className="feest-overlay" onClick={onClose}>
+        <div className="feest-backdrop" />
+        <div className="feest-card" style={{ maxWidth: 520, padding: '34px 28px 30px', borderWidth: 4 }} onClick={e => e.stopPropagation()}>
+          <div className="feest-emoji-row" style={{ fontSize: 42 }}>{msg.emoji}</div>
+          <div className="feest-title" style={{ fontSize: 34 }}>{msg.title}</div>
+          <div className="feest-sub" style={{ fontSize: 20, lineHeight: 1.4, marginBottom: 12 }}>{msg.getSub(event.childName, event.value)}</div>
+          <div style={{ display:'inline-flex', alignItems:'center', gap:10, margin:'8px auto 18px', padding:'12px 18px', borderRadius:999, background:'rgba(255,255,255,.72)', border:'2px solid rgba(108,99,255,.18)', fontWeight:900, fontSize: event.type === 'level' ? 24 : 22, color:'#5b50ff' }}>
+            {event.type === 'level' ? <>⭐ Level {event.value}</> : <>🔥 {event.value} dagen op rij</>}
+          </div>
+          {event.type === 'streak' && event.bonus ? (
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#0f766e', marginBottom: 12 }}>+{event.bonus} bonuscoins verdiend 🪙</div>
+          ) : null}
+          <button className="btn bp" style={{ fontSize:18, padding:"12px 28px", marginTop:6 }} onClick={onClose}>
+            🎉 Verder
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── APP ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,    setScreen]    = useState("home");
@@ -1819,6 +1900,8 @@ export default function App() {
   const { playTaskDone, playCoinBurst, playAllDone, playSpend, playDrumroll } = useSound();
   const coinTargetRef = useRef(null);
   const [showFeest, setShowFeest] = useState(false);
+  const [achievementOverlay, setAchievementOverlay] = useState(null);
+  const prevKidStatsRef = useRef({});
   const [pinChild,  setPinChild]  = useState(null);
   const [pinParent, setPinParent] = useState(false);
   const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
@@ -2182,6 +2265,7 @@ export default function App() {
       return sum + (t ? t.coins : 0);
     }, 0);
     setPrevApproved(p => ({ ...p, [id]: currentApproved }));
+    prevKidStatsRef.current[id] = buildChildStats(data, id, getTodayISO(), levelThresholds);
     setActiveKid(id);
     setKidTab("tasks");
     setScreen("child");
@@ -2194,6 +2278,34 @@ export default function App() {
   };
 
   const goHome = () => { setScreen("home"); setActiveKid(null); };
+
+  useEffect(() => {
+    if (loading || !activeKid || screen !== "child") return;
+    const todayIso = getTodayISO();
+    const stats = buildChildStats(data, activeKid, todayIso, levelThresholds);
+    const childName = data.children.find(c => c.id === activeKid)?.name || "";
+    const prev = prevKidStatsRef.current[activeKid] || { level: stats.level, streak: stats.streak };
+    const queue = [];
+
+    if (stats.level > prev.level) {
+      const eventId = `level:${activeKid}:${stats.level}`;
+      if (!hasSeenAchievement(eventId)) {
+        queue.push({ id: eventId, type: 'level', value: stats.level, childName });
+      }
+    }
+
+    const hitMilestone = STREAK_MILESTONES.find(m => stats.streak === m && prev.streak < m);
+    if (hitMilestone) {
+      const bonus = hitMilestone === 3 ? 5 : hitMilestone === 7 ? 10 : hitMilestone === 14 ? 20 : 0;
+      const eventId = `streak:${activeKid}:${hitMilestone}`;
+      if (!hasSeenAchievement(eventId)) {
+        queue.push({ id: eventId, type: 'streak', value: hitMilestone, childName, bonus });
+      }
+    }
+
+    prevKidStatsRef.current[activeKid] = { level: stats.level, streak: stats.streak };
+    if (queue.length && !achievementOverlay) setAchievementOverlay(queue[0]);
+  }, [loading, screen, activeKid, data, levelThresholds, achievementOverlay]);
 
   if (loading) return (
     <>
@@ -2261,6 +2373,16 @@ export default function App() {
           <FeestOverlay
             childName={activeKidName}
             onClose={() => setShowFeest(false)}
+          />
+        )}
+
+        {achievementOverlay && (
+          <AchievementOverlay
+            event={achievementOverlay}
+            onClose={() => {
+              if (achievementOverlay?.id) markAchievementSeen(achievementOverlay.id);
+              setAchievementOverlay(null);
+            }}
           />
         )}
 
