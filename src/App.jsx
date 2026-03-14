@@ -212,7 +212,9 @@ const REWARD_META_CLOSE = "[[/FPREWARD]]";
 function encodeRewardDesc(visibleDesc, meta = {}) {
   const cleanDesc = (visibleDesc || "").trim();
   const targetChildIds = Array.isArray(meta.targetChildIds) ? meta.targetChildIds.filter(Boolean) : [];
-  const payload = { targetChildIds };
+  const rewardType = meta.rewardType === "goal" ? "goal" : "reward";
+  const goalTarget = Math.max(1, Number(meta.goalTarget || meta.goalCost || 1));
+  const payload = { targetChildIds, rewardType, goalTarget };
   const metaBlock = `${REWARD_META_OPEN}${JSON.stringify(payload)}${REWARD_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
 }
@@ -235,7 +237,13 @@ function parseRewardDesc(rawDesc = "") {
   }
 
   const targetChildIds = Array.isArray(meta.targetChildIds) ? meta.targetChildIds.filter(Boolean) : [];
-  return { visibleDesc, targetChildIds };
+  const rewardType = meta.rewardType === "goal" ? "goal" : "reward";
+  const goalTarget = Math.max(1, Number(meta.goalTarget || meta.goalCost || 1));
+  return { visibleDesc, targetChildIds, rewardType, goalTarget };
+}
+
+function isGoalReward(reward) {
+  return parseRewardDesc(reward?.desc || "").rewardType === "goal";
 }
 
 function rewardVisibleForChild(reward, childId) {
@@ -251,6 +259,112 @@ function getRewardTargetLabel(reward, children = []) {
     .filter(Boolean)
     .map(c => `${c.avatar} ${c.name}`);
   return names.length ? names.join(" · ") : "Specifieke kinderen";
+}
+
+function isBonusRedemption(r) {
+  return Number(r?.cost || 0) > 0 && String(r?.rewardId || "").startsWith("bonus:");
+}
+
+function getBonusLabel(r) {
+  const raw = String(r?.rewardTitle || "");
+  return raw.replace(/^Bonus\s*[—-]\s*/i, "").trim() || "Bonus";
+}
+
+function getWeekStartISO(referenceDate = getTodayISO()) {
+  const d = new Date(`${referenceDate}T00:00:00`);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split("T")[0];
+}
+
+function addDaysISO(isoDate, days) {
+  const d = new Date(`${isoDate}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
+function buildChildStats(data, childId, referenceDate = getTodayISO()) {
+  const childTasks = (data?.tasks || []).filter(t => t.childId === childId && !isRecurringTemplateTask(t));
+  const approvedTasks = childTasks.filter(t => t.status === "approved");
+  const doneTasks = childTasks.filter(t => t.status === "done");
+  const pendingTasks = childTasks.filter(t => t.status === "pending");
+
+  const approvedByDate = approvedTasks.reduce((acc, t) => {
+    const anchor = getTaskCompletedAnchorDate(t) || t.date;
+    if (anchor) acc[anchor] = (acc[anchor] || 0) + 1;
+    return acc;
+  }, {});
+  let streak = 0;
+  let cursor = referenceDate;
+  while (approvedByDate[cursor] > 0) {
+    streak += 1;
+    cursor = addDaysISO(cursor, -1);
+  }
+
+  const weekStart = getWeekStartISO(referenceDate);
+  const weekEnd = addDaysISO(weekStart, 6);
+  const inWeek = (iso) => iso >= weekStart && iso <= weekEnd;
+
+  const weekApproved = approvedTasks.filter(t => {
+    const anchor = getTaskCompletedAnchorDate(t) || t.date;
+    return anchor && inWeek(anchor);
+  });
+  const doneInWeek = doneTasks.filter(t => {
+    const anchor = getTaskCompletedAnchorDate(t) || t.date;
+    return anchor && inWeek(anchor);
+  });
+  const weekPending = pendingTasks.filter(t => t.date >= weekStart && t.date <= weekEnd);
+
+  const childReds = (data?.redemptions || []).filter(r => r.childId === childId);
+  const positiveBonuses = childReds.filter(r => isBonusRedemption(r) && r.status === "approved");
+  const penalties = childReds.filter(r => isPenaltyRedemption(r));
+
+  const weekEarnedFromTasks = weekApproved.reduce((s, t) => s + Number(t.coins || 0), 0);
+  const weekBonusCoins = positiveBonuses.filter(r => inWeek(r.date)).reduce((s, r) => s + Number(r.cost || 0), 0);
+  const weekPenaltyCoins = penalties.filter(r => inWeek(r.date)).reduce((s, r) => s + Math.abs(Number(r.cost || 0)), 0);
+
+  const totalEarnedEver = approvedTasks.reduce((s, t) => s + Number(t.coins || 0), 0) + positiveBonuses.reduce((s, r) => s + Number(r.cost || 0), 0);
+  const totalApprovedTasks = approvedTasks.length;
+
+  const levelThresholds = [0, 25, 60, 110, 180, 270, 380, 520, 700, 920];
+  let level = 1;
+  for (let i = 0; i < levelThresholds.length; i++) {
+    if (totalEarnedEver >= levelThresholds[i]) level = i + 1;
+  }
+  const currentLevelStart = levelThresholds[Math.max(0, level - 1)] || 0;
+  const nextLevelTarget = levelThresholds[level] || (currentLevelStart + 250);
+  const levelProgress = Math.min(100, Math.round(((totalEarnedEver - currentLevelStart) / Math.max(1, nextLevelTarget - currentLevelStart)) * 100));
+
+  const badgeCandidates = [
+    { id: "first-task", icon: "🌟", title: "Eerste stap", desc: "Je eerste taak goedgekeurd", unlocked: totalApprovedTasks >= 1 },
+    { id: "task-10", icon: "🛠️", title: "Doorzetter", desc: "10 taken goedgekeurd", unlocked: totalApprovedTasks >= 10 },
+    { id: "task-25", icon: "🏆", title: "Taakmachine", desc: "25 taken goedgekeurd", unlocked: totalApprovedTasks >= 25 },
+    { id: "streak-3", icon: "🔥", title: "Vlammetje", desc: "3 dagen streak", unlocked: streak >= 3 },
+    { id: "streak-7", icon: "⚡", title: "Onstuitbaar", desc: "7 dagen streak", unlocked: streak >= 7 },
+    { id: "coins-50", icon: "🪙", title: "Spaarder", desc: "50 coins ooit verdiend", unlocked: totalEarnedEver >= 50 },
+    { id: "coins-150", icon: "💎", title: "Schatkist", desc: "150 coins ooit verdiend", unlocked: totalEarnedEver >= 150 },
+    { id: "first-reward", icon: "🎁", title: "Ingewisseld", desc: "Eerste beloning aangevraagd", unlocked: childReds.some(r => !isPenaltyRedemption(r) && !isBonusRedemption(r)) },
+  ];
+
+  return {
+    streak,
+    weekStart,
+    weekEnd,
+    weekApprovedCount: weekApproved.length,
+    weekDoneCount: doneInWeek.length,
+    weekPendingCount: weekPending.length,
+    weekEarnedCoins: weekEarnedFromTasks + weekBonusCoins,
+    weekPenaltyCoins,
+    totalEarnedEver,
+    totalApprovedTasks,
+    level,
+    levelProgress,
+    nextLevelTarget,
+    currentLevelStart,
+    badges: badgeCandidates.filter(b => b.unlocked),
+    allBadges: badgeCandidates,
+  };
 }
 
 const DAGEN   = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
@@ -1652,7 +1766,7 @@ export default function App() {
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(null);
   const [activeKid, setActiveKid] = useState(null);
-  const [tab,       setTab]       = useState("tasks");
+  const [tab,       setTab]       = useState("dashboard");
   const [kidTab,    setKidTab]    = useState("tasks");
   const [prevApproved, setPrevApproved] = useState({});
   const [showCoins,    setShowCoins]    = useState(null);
@@ -1945,6 +2059,42 @@ export default function App() {
       reload();
     },
   };
+
+
+  useEffect(() => {
+    if (loading || !data.children?.length) return;
+    let cancelled = false;
+    const run = async () => {
+      const todayIso = getTodayISO();
+      const yesterday = addDaysISO(todayIso, -1);
+      for (const child of data.children) {
+        const stats = buildChildStats(data, child.id, todayIso);
+        if (![3, 7, 14].includes(stats.streak)) continue;
+        const bonusAmount = stats.streak === 3 ? 5 : stats.streak === 7 ? 10 : 20;
+        const rewardId = `bonus:streak:${child.id}:${todayIso}:${stats.streak}`;
+        const already = data.redemptions.some(r => r.rewardId === rewardId);
+        const hasApprovedToday = data.tasks.some(t => t.childId === child.id && t.status === "approved" && (getTaskCompletedAnchorDate(t) || t.date) === todayIso);
+        const hadYesterday = data.tasks.some(t => t.childId === child.id && t.status === "approved" && (getTaskCompletedAnchorDate(t) || t.date) === yesterday);
+        if (!already && hasApprovedToday && (stats.streak === 3 ? hadYesterday : true)) {
+          await dbUpdateChildCoins(child.id, (child.coins || 0) + bonusAmount);
+          await supabase.from('redemptions').insert({
+            id: genId(),
+            child_id: child.id,
+            reward_id: rewardId,
+            reward_title: `Bonus — ${stats.streak} dagen streak`,
+            reward_emoji: '🔥',
+            cost: bonusAmount,
+            date: todayIso,
+            status: 'approved'
+          });
+          if (!cancelled) reload();
+          break;
+        }
+      }
+    };
+    run().catch(console.error);
+    return () => { cancelled = true; };
+  }, [data.children, data.tasks, data.redemptions, loading, reload]);
 
   // When a child opens their screen, show PIN first if set
   const openChildScreen = (id) => {
@@ -2437,6 +2587,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
   const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
+  const stats = buildChildStats(data, activeKid, todayNow);
+  const myGoals = data.rewards.filter(r => isGoalReward(r) && rewardVisibleForChild(r, activeKid));
 
   const [feitje]  = useState(() => FEITJES[Math.floor(Math.random() * FEITJES.length)]);
   const [coinPop, setCoinPop] = useState(false);
@@ -2530,6 +2682,24 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
         </div>
       </div>
 
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10, marginBottom:16 }}>
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:11, color:th.pri, fontWeight:800, textTransform:"uppercase" }}>🔥 Streak</div>
+          <div style={{ fontSize:26, fontWeight:900 }}>{stats.streak} dag{stats.streak === 1 ? "" : "en"}</div>
+          <div style={{ fontSize:12, color:"var(--t2)" }}>Op rij met goedgekeurde taken</div>
+        </div>
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:11, color:th.pri, fontWeight:800, textTransform:"uppercase" }}>⭐ Level</div>
+          <div style={{ fontSize:26, fontWeight:900 }}>Level {stats.level}</div>
+          <div className="pb" style={{ marginTop:6 }}><div className="pf" style={{ width:`${stats.levelProgress}%`, background: th.pri }} /></div>
+        </div>
+        <div className="card" style={{ padding:"12px 14px" }}>
+          <div style={{ fontSize:11, color:th.pri, fontWeight:800, textTransform:"uppercase" }}>🏅 Badges</div>
+          <div style={{ fontSize:26, fontWeight:900 }}>{stats.badges.length}</div>
+          <div style={{ fontSize:12, color:"var(--t2)" }}>Vrijgespeeld tot nu toe</div>
+        </div>
+      </div>
+
       {/* Tabs */}
       <div className="tabs" style={{ background: "rgba(255,255,255,.6)" }}>
         <button className={`tab ${kidTab === "tasks"   ? "on" : ""}`}
@@ -2588,7 +2758,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                   {reserved > 0 && <span style={{ color:"#f59e0b", fontWeight:700 }}> · {reserved} gereserveerd · <strong style={{ color: th.pri }}>{available} beschikbaar</strong></span>}
                 </div>
                 <div className="ga">
-                  {data.rewards.filter(r => rewardVisibleForChild(r, cur.id)).map(r => {
+                  {data.rewards.filter(r => !isGoalReward(r) && rewardVisibleForChild(r, cur.id)).map(r => {
                     const rewardMeta = parseRewardDesc(r.desc);
                     const can = available >= r.cost;
                     return (
@@ -2607,7 +2777,27 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                       </div>
                     );
                   })}
-                  {data.rewards.filter(r => rewardVisibleForChild(r, cur.id)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">{th.rewardIcon}</div><div className="et">Nog geen beloningen voor jou</div></div>}
+                  {data.rewards.filter(r => !isGoalReward(r) && rewardVisibleForChild(r, cur.id)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">{th.rewardIcon}</div><div className="et">Nog geen beloningen voor jou</div></div>}
+                </div>
+
+                <div style={{ marginTop: 18 }}>
+                  <div className="st" style={{ marginBottom: 10, color: th.priD }}>Spaardoelen 🎯</div>
+                  <div className="ga">
+                    {myGoals.map(g => {
+                      const info = parseRewardDesc(g.desc);
+                      const progress = Math.min(100, Math.round(((cur.coins || 0) / Math.max(1, info.goalTarget)) * 100));
+                      return (
+                        <div key={g.id} className="rc" style={{ border: `3px solid ${th.pri}33`, background: "#fff" }}>
+                          <div style={{ fontSize: 42, marginBottom: 8 }}>{g.emoji}</div>
+                          <div style={{ fontWeight: 800, fontSize: 15 }}>{g.title}</div>
+                          <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 10 }}>{info.visibleDesc}</div>
+                          <div className="pb" style={{ marginBottom: 8 }}><div className="pf" style={{ width: `${progress}%`, background: th.pri }} /></div>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: th.pri }}>{cur.coins} / {info.goalTarget} coins</div>
+                        </div>
+                      );
+                    })}
+                    {myGoals.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎯</div><div className="et">Nog geen spaardoelen voor jou</div></div>}
+                  </div>
                 </div>
               </>
             );
@@ -2621,10 +2811,14 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           .sort((a, b) => b.date.localeCompare(a.date));
         return (
           <div>
-            <div className="st" style={{ marginBottom: 14, color: th.priD }}>Mijn Aankopen 🛍️</div>
+            <div className="st" style={{ marginBottom: 14, color: th.priD }}>Mijn geschiedenis 📜</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:10, marginBottom:14 }}>
+              {stats.badges.map(b => <div key={b.id} className="card" style={{ padding:"10px 12px", textAlign:"left" }}><div style={{ fontSize:28 }}>{b.icon}</div><div style={{ fontWeight:800, fontSize:14 }}>{b.title}</div><div style={{ fontSize:12, color:"var(--t2)" }}>{b.desc}</div></div>)}
+            </div>
             {myRedemptions.length === 0 ? (
               <div className="emp"><div className="ei">🛍️</div><div className="et">Je hebt nog niets aangevraagd</div></div>
             ) : myRedemptions.map(r => (
+
               <div key={r.id} style={{
                 display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
                 borderRadius:14, marginBottom:8, background:"#fff",
@@ -2633,10 +2827,10 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
               }}>
                 <div style={{ fontSize:34 }}>{r.rewardEmoji}</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontWeight:800, fontSize:15 }}>{r.rewardTitle}</div>
-                  <div style={{ fontSize:12, color:"var(--t2)", marginTop:2 }}>📅 {r.date} · 🪙 {r.cost} coins</div>
+                  <div style={{ fontWeight:800, fontSize:15 }}>{isPenaltyRedemption(r) ? "Ecoins afgepakt" : isBonusRedemption(r) ? "Bonus verdiend" : r.rewardTitle}</div>
+                  <div style={{ fontSize:12, color:"var(--t2)", marginTop:2 }}>📅 {r.date} · {isPenaltyRedemption(r) ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`} coins</div>{isPenaltyRedemption(r) && <div style={{ fontSize:12, color:"#9a3412", fontWeight:700, marginTop:4 }}>Reden: {getPenaltyReason(r)}</div>}{isBonusRedemption(r) && <div style={{ fontSize:12, color:"#065f46", fontWeight:700, marginTop:4 }}>{getBonusLabel(r)}</div>}
                 </div>
-                {r.status === "approved" && <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>✅ Goedgekeurd!</span>}
+                {isBonusRedemption(r) && <span style={{ background:"#dcfce7", color:"#166534", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>🎉 Bonus!</span>}{r.status === "approved" && !isBonusRedemption(r) && <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>✅ Goedgekeurd!</span>}
                 {r.status === "rejected" && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>❌ Afgewezen</span>}
                 {r.status === "pending"  && <span style={{ background:th.pri+"18", color:th.pri, borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>⏳ In behandeling</span>}
               </div>
@@ -2746,16 +2940,18 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
       </div>
       <div className="tabs">
         {[
+          ["dashboard", "📊 Dashboard"],
           ["tasks",   "📋 Taken"],
           ["approve", `✅ Goedkeuren${pending.length ? ` (${pending.length})` : ""}`],
           ["kids",    "👶 Kinderen"],
-          ["rewards", "🎁 Beloningen"],
+          ["rewards", "🎁 Beloningen & doelen"],
           ["purchases", `🛍️ Aankopen${pendingRedemptions.length ? ` (${pendingRedemptions.length})` : ""}`],
           ["settings",  "⚙️ Instellingen"],
         ].map(([k,l]) => (
           <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
+      {tab === "dashboard" && <DashboardTab data={data} getChild={getChild} />}
       {tab === "tasks"     && <TasksTab     data={data} db={db} setModal={setModal} getChild={getChild} />}
       {tab === "approve"   && <ApproveTab   data={data} db={db} pending={pending}   getChild={getChild} />}
       {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
@@ -2854,6 +3050,46 @@ function TasksTab({ data, db, setModal, getChild }) {
           );
         })
       }
+    </div>
+  );
+}
+
+
+function DashboardTab({ data, getChild }) {
+  const todayNow = getTodayISO();
+  const childStats = data.children.map(c => ({ child: c, stats: buildChildStats(data, c.id, todayNow) }));
+  const top = [...childStats].sort((a, b) => (b.stats.weekEarnedCoins - b.stats.weekPenaltyCoins) - (a.stats.weekEarnedCoins - a.stats.weekPenaltyCoins))[0];
+  const pendingApprovals = data.tasks.filter(t => t.status === "done").length;
+  const pendingPurchases = data.redemptions.filter(r => r.status === "pending" && !isPenaltyRedemption(r)).length;
+  return (
+    <div>
+      <div className="sh"><span className="st">Weekdashboard 📊</span></div>
+      <div className="g3" style={{ marginBottom: 14 }}>
+        <div className="card"><div style={{ fontSize: 12, color:"var(--t2)", fontWeight:800 }}>⏳ Open goedkeuringen</div><div style={{ fontSize: 30, fontWeight: 900 }}>{pendingApprovals}</div></div>
+        <div className="card"><div style={{ fontSize: 12, color:"var(--t2)", fontWeight:800 }}>🛍️ Open aankopen</div><div style={{ fontSize: 30, fontWeight: 900 }}>{pendingPurchases}</div></div>
+        <div className="card"><div style={{ fontSize: 12, color:"var(--t2)", fontWeight:800 }}>🏆 Koploper van de week</div><div style={{ fontSize: 22, fontWeight: 900 }}>{top ? `${top.child.avatar} ${top.child.name}` : "-"}</div></div>
+      </div>
+      <div className="g2">
+        {childStats.map(({ child, stats }) => (
+          <div key={child.id} className="card">
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+              <div style={{ fontSize: 38 }}>{child.avatar}</div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:18 }}>{child.name}</div>
+                <div style={{ fontSize:12, color:"var(--t2)" }}>Level {stats.level} · streak {stats.streak} dag{stats.streak === 1 ? "" : "en"}</div>
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:8, marginBottom:10 }}>
+              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>✅ Deze week</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.weekApprovedCount}</div></div>
+              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>🪙 Verdiend</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.weekEarnedCoins}</div></div>
+              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>⚠️ Afgepakt</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.weekPenaltyCoins}</div></div>
+              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>🏅 Badges</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.badges.length}</div></div>
+            </div>
+            <div style={{ fontSize:12, color:"var(--t2)", marginBottom:6 }}>Levelvoortgang</div>
+            <div className="pb"><div className="pf" style={{ width:`${stats.levelProgress}%` }} /></div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2991,11 +3227,11 @@ function RewardsTab({ data, db, setModal }) {
   return (
     <div>
       <div className="sh">
-        <span className="st">Beloningen 🎁</span>
-        <button className="btn bp" onClick={() => setModal({ type: "reward" })}>+ Beloning</button>
+        <span className="st">Beloningen & spaardoelen 🎁🎯</span>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}><button className="btn bp" onClick={() => setModal({ type: "reward" })}>+ Beloning</button><button className="btn bh" onClick={() => setModal({ type: "goal" })}>+ Spaardoel</button></div>
       </div>
       <div className="ga">
-        {data.rewards.map(r => {
+        {data.rewards.filter(r => !isGoalReward(r)).map(r => {
           const rewardMeta = parseRewardDesc(r.desc);
           return (
           <div key={r.id} className="card" style={{ textAlign: "center" }}>
@@ -3007,7 +3243,41 @@ function RewardsTab({ data, db, setModal }) {
             <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delReward(r.id)}>Verwijder</button>
           </div>
         )})}
-        {data.rewards.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎁</div><div className="et">Nog geen beloningen</div></div>}
+        {data.rewards.filter(r => !isGoalReward(r)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎁</div><div className="et">Nog geen beloningen</div></div>}
+      </div>
+
+      <div className="sh" style={{ marginTop: 22 }}>
+        <span className="st">Spaardoelen 🎯</span>
+      </div>
+      <div className="ga">
+        {data.rewards.filter(r => isGoalReward(r)).map(r => {
+          const info = parseRewardDesc(r.desc);
+          const targets = info.targetChildIds.length ? data.children.filter(c => info.targetChildIds.includes(c.id)) : data.children;
+          return (
+            <div key={r.id} className="card" style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 44, marginBottom: 7 }}>{r.emoji}</div>
+              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 3 }}>{r.title}</div>
+              <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 6 }}>{info.visibleDesc}</div>
+              <div style={{ fontSize: 11, color: "var(--pri)", fontWeight: 800, marginBottom: 6 }}>🎯 {getRewardTargetLabel(r, data.children)}</div>
+              <div style={{ fontSize: 19, fontWeight: 900, color: "var(--yel)", marginBottom: 10 }}>Doel: 🪙 {info.goalTarget}</div>
+              <div style={{ display:"grid", gap:6, textAlign:"left", marginBottom:12 }}>
+                {targets.map(c => {
+                  const progress = Math.min(100, Math.round(((c.coins || 0) / Math.max(1, info.goalTarget)) * 100));
+                  return (
+                    <div key={c.id}>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:4 }}>
+                        <span>{c.avatar} {c.name}</span><span>{c.coins} / {info.goalTarget}</span>
+                      </div>
+                      <div className="pb"><div className="pf" style={{ width: `${progress}%` }} /></div>
+                    </div>
+                  );
+                })}
+              </div>
+              <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delReward(r.id)}>Verwijder</button>
+            </div>
+          );
+        })}
+        {data.rewards.filter(r => isGoalReward(r)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎯</div><div className="et">Nog geen spaardoelen</div></div>}
       </div>
     </div>
   );
@@ -3020,11 +3290,12 @@ function PurchasesTab({ data, db, getChild }) {
     .filter(r => filter === "all" || r.childId === filter)
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const pendingList  = sorted.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
-  const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r));
+  const pendingList  = sorted.filter(r => r.status === "pending" && !isPenaltyRedemption(r) && !isBonusRedemption(r));
+  const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r) || isBonusRedemption(r));
 
   const statusLabel = (r) => {
     if (isPenaltyRedemption(r)) return <span style={{ background:"#fff7ed", color:"#9a3412", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
+    if (isBonusRedemption(r)) return <span style={{ background:"#dcfce7", color:"#166534", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>🎉 Bonus uitgekeerd</span>;
     if (r.status === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
     if (r.status === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
     return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
@@ -3042,10 +3313,10 @@ function PurchasesTab({ data, db, getChild }) {
             {ch && <span>{ch.avatar} {ch.name}</span>}
             <span>📅 {r.date}</span>
           </div>
-          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
+          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}{isBonusRedemption(r) && <div style={{ fontSize:12, color:"#166534", marginTop:5, fontWeight:700 }}>{getBonusLabel(r)}</div>}
           <div style={{ marginTop:5 }}>{statusLabel(r)}</div>
         </div>
-        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`}</div>
+        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : isBonusRedemption(r) ? `➕ ${r.cost}` : `🪙 ${r.cost}`}</div>
         {!penalty && r.status === "pending" && (
           <div style={{ display:"flex", gap:6 }}>
             <button className="btn bg bsm" onClick={() => db.approveRedemption(r.id)}>✅ Goedkeuren</button>
@@ -3058,7 +3329,7 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div className="sh"><span className="st">Aankopen & straffen 🛍️⚠️</span></div>
+      <div className="sh"><span className="st">Aankopen, bonussen & straffen 🛍️🎉⚠️</span></div>
 
       {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
@@ -3101,6 +3372,7 @@ function Modal({ modal, setModal, data, db }) {
   if (modal.type === "child")  return <AddChildModal  close={close} db={db} />;
   if (modal.type === "task")   return <AddTaskModal   close={close} db={db} children={data.children} />;
   if (modal.type === "reward") return <AddRewardModal close={close} db={db} children={data.children} />;
+  if (modal.type === "goal") return <AddGoalModal close={close} db={db} children={data.children} />;
   return null;
 }
 
@@ -3237,6 +3509,60 @@ function AddTaskModal({ close, db, children }) {
   );
 }
 
+
+function AddGoalModal({ close, db, children }) {
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [goalTarget, setGoalTarget] = useState(50);
+  const [emoji, setEmoji] = useState("🎯");
+  const ALL_CHILDREN_VALUE = "__goal_all_children__";
+  const [targetChildId, setTargetChildId] = useState(ALL_CHILDREN_VALUE);
+
+  const go = () => {
+    if (!title.trim()) return;
+    const targetChildIds = targetChildId === ALL_CHILDREN_VALUE ? [] : [targetChildId];
+    db.addReward({
+      title: title.trim(),
+      desc: encodeRewardDesc(desc, { targetChildIds, rewardType: "goal", goalTarget }),
+      cost: 1,
+      emoji,
+    });
+    close();
+  };
+
+  return (
+    <div className="ov" onClick={close}>
+      <div className="mo" onClick={e => e.stopPropagation()}>
+        <div className="mt">🎯 Spaardoel toevoegen</div>
+        <div className="fg"><label className="fl">Naam van het doel</label>
+          <input className="fi" value={title} onChange={e => setTitle(e.target.value)} placeholder="Bijv. LEGO set" autoFocus />
+        </div>
+        <div className="fg"><label className="fl">Omschrijving</label>
+          <textarea className="ft" value={desc} onChange={e => setDesc(e.target.value)} placeholder="Waar wordt voor gespaard?" />
+        </div>
+        <div className="fr">
+          <div className="fg"><label className="fl">Voor wie?</label>
+            <select className="fs" value={targetChildId} onChange={e => setTargetChildId(e.target.value)}>
+              {children.length > 1 && <option value={ALL_CHILDREN_VALUE}>Alle kinderen</option>}
+              {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
+            </select>
+          </div>
+          <div className="fg"><label className="fl">Doel in ecoins</label>
+            <input className="fi" type="number" min="1" max="500" value={goalTarget} onChange={e => setGoalTarget(Math.max(1, Math.min(500, Number(e.target.value) || 1)))} />
+          </div>
+        </div>
+        <div className="fg"><label className="fl">Emoji</label>
+          <input className="fi" value={emoji} onChange={e => setEmoji(e.target.value || "🎯")} placeholder="🎯" />
+        </div>
+        <div className="ma">
+          <button className="btn bh" onClick={close}>Annuleren</button>
+          <button className="btn bp" onClick={go} disabled={!title.trim()}>Doel aanmaken</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddRewardModal({ close, db, children }) {
   const [title,      setTitle]      = useState("");
   const [desc,       setDesc]       = useState("");
@@ -3260,7 +3586,7 @@ function AddRewardModal({ close, db, children }) {
   const go = () => {
     if (title.trim()) {
       const targetChildIds = targetChildId === ALL_CHILDREN_VALUE ? [] : [targetChildId];
-      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds }), cost: Math.max(1, Number(cost) || 1), emoji });
+      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds, rewardType: "reward" }), cost: Math.max(1, Number(cost) || 1), emoji });
       close();
     }
   };
