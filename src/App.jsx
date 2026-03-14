@@ -15,6 +15,7 @@ const DEFAULT_PARENT_PIN = "258000";
 const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
 const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
 const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
+const COMPLETED_HISTORY_DAYS = 14;
 
 const getStoredParentPin = () => {
   try {
@@ -85,6 +86,9 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     durationDays: Math.max(1, parseInt(meta.durationDays || 1, 10)),
     doneOn: typeof meta.doneOn === "string" ? meta.doneOn : null,
     approvedOn: typeof meta.approvedOn === "string" ? meta.approvedOn : null,
+    recurrenceType: ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none",
+    isTemplate: !!meta.isTemplate,
+    recurrenceSourceId: typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null,
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -113,8 +117,11 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const lastDecay = maxCoins - (baseDecay * (durationDays - 1));
   const doneOn = typeof meta.doneOn === "string" ? meta.doneOn : null;
   const approvedOn = typeof meta.approvedOn === "string" ? meta.approvedOn : null;
+  const recurrenceType = ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none";
+  const isTemplate = !!meta.isTemplate;
+  const recurrenceSourceId = typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null;
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -124,7 +131,24 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     durationDays: info.durationDays,
     doneOn: Object.prototype.hasOwnProperty.call(patch, "doneOn") ? patch.doneOn : info.doneOn,
     approvedOn: Object.prototype.hasOwnProperty.call(patch, "approvedOn") ? patch.approvedOn : info.approvedOn,
+    recurrenceType: Object.prototype.hasOwnProperty.call(patch, "recurrenceType") ? patch.recurrenceType : info.recurrenceType,
+    isTemplate: Object.prototype.hasOwnProperty.call(patch, "isTemplate") ? patch.isTemplate : info.isTemplate,
+    recurrenceSourceId: Object.prototype.hasOwnProperty.call(patch, "recurrenceSourceId") ? patch.recurrenceSourceId : info.recurrenceSourceId,
   });
+}
+
+function getTaskCompletedAnchorDate(task) {
+  if (!task) return null;
+  const info = parseTaskDesc(task.desc, task.coins);
+  if (task.status === "approved") return info.approvedOn || info.doneOn || task.date || null;
+  if (task.status === "done") return info.doneOn || task.date || null;
+  return null;
+}
+
+function isTaskOlderThanHistoryWindow(task, referenceDate = getTodayISO()) {
+  const anchorDate = getTaskCompletedAnchorDate(task);
+  if (!anchorDate) return false;
+  return diffDays(anchorDate, referenceDate) >= COMPLETED_HISTORY_DAYS;
 }
 
 function shouldKeepCompletedVisible(task, referenceDate = getTodayISO()) {
@@ -150,6 +174,36 @@ function getTaskDaysLeft(task, referenceDate = today) {
   const info = parseTaskDesc(task.desc, task.coins);
   const elapsedDays = Math.max(0, diffDays(task.date, referenceDate));
   return Math.max(0, info.durationDays - elapsedDays);
+}
+
+function isRecurringTemplateTask(task) {
+  if (!task) return false;
+  const info = parseTaskDesc(task.desc, task.coins);
+  return task.status === "template" || info.isTemplate;
+}
+
+function getRecurringType(task) {
+  const info = parseTaskDesc(task?.desc, task?.coins);
+  return info.recurrenceType || "none";
+}
+
+function getRecurringLabel(task) {
+  const type = getRecurringType(task);
+  if (type === "daily") return "Dagelijks";
+  if (type === "weekly") return "Wekelijks";
+  return "Eenmalig";
+}
+
+function getRecurringOccurrenceDate(templateTask, referenceDate = getTodayISO()) {
+  if (!isRecurringTemplateTask(templateTask)) return null;
+  const info = parseTaskDesc(templateTask.desc, templateTask.coins);
+  if (!templateTask.date || templateTask.date > referenceDate) return null;
+  if (info.recurrenceType === "daily") return referenceDate;
+  if (info.recurrenceType === "weekly") {
+    const daysBetween = diffDays(templateTask.date, referenceDate);
+    return daysBetween >= 0 && daysBetween % 7 === 0 ? referenceDate : null;
+  }
+  return null;
 }
 
 const REWARD_META_OPEN = "[[FPREWARD]]";
@@ -1610,16 +1664,63 @@ export default function App() {
     })
     .catch(console.error), []);
 
+  const processRecurringTemplates = useCallback(async () => {
+    if (loading || !data.tasks?.length) return;
+
+    const templates = data.tasks.filter(isRecurringTemplateTask);
+    if (!templates.length) return;
+
+    const referenceDate = getTodayISO();
+    let changed = false;
+
+    for (const template of templates) {
+      const occurrenceDate = getRecurringOccurrenceDate(template, referenceDate);
+      if (!occurrenceDate) continue;
+      const info = parseTaskDesc(template.desc, template.coins);
+      const alreadyExists = data.tasks.some((task) => {
+        if (task.id === template.id) return false;
+        const taskInfo = parseTaskDesc(task.desc, task.coins);
+        return !isRecurringTemplateTask(task)
+          && task.childId === template.childId
+          && task.date === occurrenceDate
+          && taskInfo.recurrenceSourceId === template.id;
+      });
+      if (alreadyExists) continue;
+
+      await dbAddTask({
+        id: genId(),
+        childId: template.childId,
+        title: template.title,
+        description: encodeTaskDesc(info.visibleDesc, {
+          maxCoins: info.maxCoins,
+          durationDays: info.durationDays,
+          recurrenceType: info.recurrenceType,
+          recurrenceSourceId: template.id,
+          isTemplate: false,
+          doneOn: null,
+          approvedOn: null,
+        }),
+        coins: info.maxCoins,
+        date: occurrenceDate,
+        status: 'pending',
+      });
+      changed = true;
+    }
+
+    if (changed) reload();
+  }, [data.tasks, loading, reload]);
+
   // ── Verwerk gemiste taken: coins vervallen op basis van max coins ÷ duur ──
   const processMissedTasks = useCallback(async () => {
     if (loading || !data.tasks?.length) return;
 
     let changed = false;
+    const referenceDate = getTodayISO();
 
     for (const task of data.tasks) {
-      if (task.status !== "pending" || !task.date || task.date >= today) continue;
+      if (task.status !== "pending" || !task.date || task.date >= referenceDate) continue;
 
-      const nextCoins = getTaskRemainingCoins(task, today);
+      const nextCoins = getTaskRemainingCoins(task, referenceDate);
 
       if (nextCoins <= 0) {
         await dbDelTask(task.id);
@@ -1635,13 +1736,38 @@ export default function App() {
     }
 
     if (changed) reload();
-  }, [data.tasks, loading]);
+  }, [data.tasks, loading, reload]);
+
+  const cleanupOldCompletedTasks = useCallback(async () => {
+    if (loading || !data.tasks?.length) return;
+
+    const oldCompleted = data.tasks.filter(
+      (task) => (task.status === "done" || task.status === "approved") && isTaskOlderThanHistoryWindow(task, getTodayISO())
+    );
+
+    if (!oldCompleted.length) return;
+
+    for (const task of oldCompleted) {
+      await dbDelTask(task.id);
+    }
+
+    reload();
+  }, [data.tasks, loading, reload]);
+
+  // ── Maak waar nodig losse taken aan uit terugkerende sjablonen ──
+  useEffect(() => {
+    if (!loading) processRecurringTemplates().catch(err => console.error("Terugkerende taken verwerken mislukt:", err));
+  }, [loading, data.tasks, processRecurringTemplates]);
 
   // ── Realtime: luister naar wijzigingen in de database ──
   // Zodra een ander apparaat iets wijzigt, wordt de data hier automatisch bijgewerkt
   useEffect(() => {
     if (!loading) processMissedTasks().catch(err => console.error("Gemiste taken verwerken mislukt:", err));
   }, [loading, data.tasks, processMissedTasks]);
+
+  useEffect(() => {
+    if (!loading) cleanupOldCompletedTasks().catch(err => console.error("Opschonen oude afgeronde taken mislukt:", err));
+  }, [loading, data.tasks, cleanupOldCompletedTasks]);
 
   useEffect(() => {
     const channel = supabase
@@ -1725,7 +1851,7 @@ export default function App() {
     },
     addTask: async (t) => {
       const id = genId();
-      await dbAddTask({ id, status: 'pending', ...t });
+      await dbAddTask({ id, status: t.status || 'pending', ...t });
       reload();
     },
     delTask: async (id) => {
@@ -2615,12 +2741,23 @@ function TasksTab({ data, db, setModal, getChild }) {
   const [filter, setFilter] = useState("all");
   const [showHistory, setShowHistory] = useState(false);
   const todayNow = getTodayISO();
+  const recurringTemplates = [...data.tasks]
+    .filter(t => isRecurringTemplateTask(t) && (filter === "all" || t.childId === filter))
+    .sort((a, b) => a.date.localeCompare(b.date));
   const tasks = [...data.tasks]
-    .filter(t => (filter === "all" || t.childId === filter) && (t.status === "pending" || shouldKeepCompletedVisible(t, todayNow) || (showHistory && (t.status === "done" || t.status === "approved"))))
+    .filter(t => !isRecurringTemplateTask(t))
+    .filter(t => (
+      (filter === "all" || t.childId === filter) &&
+      (
+        t.status === "pending" ||
+        shouldKeepCompletedVisible(t, todayNow) ||
+        (showHistory && (t.status === "done" || t.status === "approved") && !isTaskOlderThanHistoryWindow(t, todayNow))
+      )
+    ))
     .sort((a,b) => a.date.localeCompare(b.date));
   const statusEl = (s) => {
     if (s === "pending") return <span className="bd bbl">Te doen</span>;
-    if (s === "done")    return <span className="bd by">⏳ Wacht</span>;
+    if (s === "done") return <span className="bd by">⏳ Wacht</span>;
     return <span className="bd bgn">✅ Klaar</span>;
   };
   return (
@@ -2636,8 +2773,37 @@ function TasksTab({ data, db, setModal, getChild }) {
           <button key={c.id} className={`btn bsm ${filter === c.id ? "bp" : "bh"}`} onClick={() => setFilter(c.id)}>{c.avatar} {c.name}</button>
         ))}
       </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>🔁 Terugkerende taken</div>
+        <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 10 }}>Deze sjablonen maken automatisch losse taken op de juiste dag. Kinderen zien toekomstige herhalingen niet vooraf.</div>
+        {recurringTemplates.length === 0 ? (
+          <div style={{ fontSize: 12, color: "var(--t2)" }}>Geen terugkerende taken actief.</div>
+        ) : recurringTemplates.map(t => {
+          const ch = getChild(t.childId);
+          return (
+            <div key={t.id} className="tr">
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</span>
+                  <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>🔁 {getRecurringLabel(t)}</span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {ch && <span>{ch.avatar} {ch.name}</span>}
+                  <span>📅 start {t.date}</span>
+                  <span>⏳ {parseTaskDesc(t.desc, t.coins).durationDays} dag(en)</span>
+                  {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
+                </div>
+              </div>
+              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>🪙{parseTaskDesc(t.desc, t.coins).maxCoins}</span>
+              <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button>
+            </div>
+          );
+        })}
+      </div>
+
       {tasks.length === 0
-        ? <div className="emp"><div className="ei">📋</div><div className="et">Geen taken — maak er een aan!</div></div>
+        ? <div className="emp"><div className="ei">📋</div><div className="et">Geen losse taken — maak er een aan!</div></div>
         : tasks.map(t => {
           const ch = getChild(t.childId);
           return (
@@ -2645,6 +2811,7 @@ function TasksTab({ data, db, setModal, getChild }) {
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</span>{statusEl(t.status)}
+                  {parseTaskDesc(t.desc, t.coins).recurrenceSourceId && <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>van terugkerend</span>}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
@@ -2932,36 +3099,48 @@ function AddChildModal({ close, db }) {
 }
 
 function AddTaskModal({ close, db, children }) {
-  const [title,   setTitle]   = useState("");
-  const [desc,    setDesc]    = useState("");
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
   const [childId, setChildId] = useState(children[0]?.id || "");
-  const [coins,   setCoins]   = useState(10);
-  const [date,    setDate]    = useState(today);
+  const [coins, setCoins] = useState(10);
+  const [date, setDate] = useState(today);
   const [durationDays, setDurationDays] = useState(3);
+  const [recurrenceType, setRecurrenceType] = useState("none");
   const BOTH_CHILDREN_VALUE = "__all_children__";
+
   const go = async () => {
-    if (title.trim() && childId) {
-      const baseTask = {
-        title: title.trim(),
-        desc: encodeTaskDesc(desc, { maxCoins: +coins, durationDays: +durationDays }),
-        coins: +coins,
-        date,
-      };
-      if (childId === BOTH_CHILDREN_VALUE) {
-        await Promise.all(children.map((child) => db.addTask({ ...baseTask, childId: child.id })));
-      } else {
-        await db.addTask({ ...baseTask, childId });
-      }
-      close();
+    if (!title.trim() || !childId) return;
+
+    const createTaskPayload = (targetChildId) => ({
+      title: title.trim(),
+      desc: encodeTaskDesc(desc, {
+        maxCoins: +coins,
+        durationDays: +durationDays,
+        recurrenceType,
+        isTemplate: recurrenceType !== "none",
+      }),
+      coins: +coins,
+      date,
+      childId: targetChildId,
+      status: recurrenceType === "none" ? "pending" : "template",
+    });
+
+    if (childId === BOTH_CHILDREN_VALUE) {
+      await Promise.all(children.map((child) => db.addTask(createTaskPayload(child.id))));
+    } else {
+      await db.addTask(createTaskPayload(childId));
     }
+    close();
   };
+
   return (
     <div className="ov" onClick={close}>
       <div className="mo" onClick={e => e.stopPropagation()}>
         <div className="mt">📋 Nieuwe Taak</div>
-        {children.length === 0
-          ? <p style={{ color: "var(--t2)" }}>Voeg eerst een kind toe.</p>
-          : <>
+        {children.length === 0 ? (
+          <p style={{ color: "var(--t2)" }}>Voeg eerst een kind toe.</p>
+        ) : (
+          <>
             <div className="fg"><label className="fl">Taaknaam</label>
               <input className="fi" value={title} onChange={e => setTitle(e.target.value)} placeholder="bv. Kamer opruimen" autoFocus />
             </div>
@@ -2975,16 +3154,31 @@ function AddTaskModal({ close, db, children }) {
                   {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
                 </select>
                 <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                  {childId === BOTH_CHILDREN_VALUE ? "Er worden twee losse taken aangemaakt, één per kind." : "Deze taak wordt aan één kind toegewezen."}
+                  {childId === BOTH_CHILDREN_VALUE ? "Er worden twee losse taken of sjablonen aangemaakt, één per kind." : "Deze taak wordt aan één kind toegewezen."}
                 </div>
               </div>
-              <div className="fg"><label className="fl">Datum</label>
+              <div className="fg"><label className="fl">Startdatum</label>
                 <input className="fi" type="date" value={date} onChange={e => setDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="fr">
+              <div className="fg"><label className="fl">Herhaling</label>
+                <select className="fs" value={recurrenceType} onChange={e => setRecurrenceType(e.target.value)}>
+                  <option value="none">Eenmalig</option>
+                  <option value="daily">Dagelijks terugkerend</option>
+                  <option value="weekly">Wekelijks terugkerend</option>
+                </select>
+                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
+                  {recurrenceType === "none" ? "De taak wordt één keer aangemaakt op de gekozen startdag." : recurrenceType === "daily" ? "De tool maakt elke dag automatisch één nieuwe losse taak voor die dag." : "De tool maakt alleen op de volgende passende weekdag een nieuwe losse taak aan."}
+                </div>
+              </div>
+              <div className="fg"><label className="fl">Beschikbaar in dagen</label>
+                <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
               </div>
             </div>
             <div className="fg">
               <label className="fl">⏳ Aantal dagen beschikbaar: <strong>{durationDays}</strong></label>
-              <input type="range" min="1" max="14" value={durationDays} onChange={e => setDurationDays(e.target.value)} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
+              <input type="range" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}>
                 <span>1 dag</span>
                 <span>{Math.floor(coins / Math.max(1, durationDays))} coin verval per gemiste dag{coins % Math.max(1, durationDays) !== 0 ? ` · laatste dag ${coins - (Math.floor(coins / Math.max(1, durationDays)) * (Math.max(1, durationDays) - 1))}` : ""}</span>
@@ -2993,14 +3187,18 @@ function AddTaskModal({ close, db, children }) {
             </div>
             <div className="fg">
               <label className="fl">🪙 Maximaal te verdienen coins: <strong>{coins}</strong></label>
-              <input type="range" min="1" max="50" value={coins} onChange={e => setCoins(e.target.value)} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
+              <input type="range" min="1" max="50" value={coins} onChange={e => setCoins(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}><span>1</span><span>50</span></div>
             </div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
-              Start op <strong>{date}</strong> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 2 ? "" : "en"} · op dag {durationDays} na de start staat hij op 0 en verdwijnt hij.
+              {recurrenceType === "none"
+                ? <>Start op <strong>{date}</strong> · zichtbaar vanaf de startdag · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
+                : recurrenceType === "daily"
+                  ? <>Dit wordt een <strong>dagelijks taaksjabloon</strong>. Kinderen zien telkens alleen de losse taak van de actuele dag, niet alle toekomstige dagen vooruit.</>
+                  : <>Dit wordt een <strong>wekelijks taaksjabloon</strong>. De losse taak verschijnt alleen op de passende weekdag vanaf <strong>{date}</strong>.</>}
             </div>
           </>
-        }
+        )}
         <div className="ma">
           <button className="btn bh" onClick={close}>Annuleren</button>
           {children.length > 0 && <button className="btn bp" onClick={go} disabled={!title.trim()}>Aanmaken</button>}
