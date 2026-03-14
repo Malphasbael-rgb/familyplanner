@@ -9,64 +9,69 @@ import {
 
 const today = new Date().toISOString().split("T")[0];
 const genId = () => Math.random().toString(36).substr(2, 9);
-const PARENT_PIN_KEY = "familyplanner-parent-pin-v1";
-const DEFAULT_PARENT_PIN = "258000";
-const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
-const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
-const getStoredParentPin = () => {
+const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
+
+function diffDays(fromDate, toDate) {
+  const start = new Date(`${fromDate}T00:00:00`);
+  const end = new Date(`${toDate}T00:00:00`);
+  return Math.max(0, Math.floor((end - start) / 86400000));
+}
+
+function loadOverdueTrack() {
   try {
-    const pin = localStorage.getItem(PARENT_PIN_KEY);
-    return /^\d{6}$/.test(pin || "") ? pin : DEFAULT_PARENT_PIN;
+    return JSON.parse(localStorage.getItem(OVERDUE_TRACK_KEY) || "{}");
   } catch {
-    return DEFAULT_PARENT_PIN;
-  }
-};
-const setStoredParentPin = (pin) => {
-  try {
-    localStorage.setItem(PARENT_PIN_KEY, pin);
-  } catch {}
-};
-const isCloudSettingsReward = (r) => r?.id === CLOUD_SETTINGS_REWARD_ID || r?.title === CLOUD_SETTINGS_TITLE;
-const stripCloudSettingsFromData = (d) => ({
-  ...d,
-  rewards: Array.isArray(d?.rewards) ? d.rewards.filter(r => !isCloudSettingsReward(r)) : [],
-});
-async function fetchParentPinFromCloud() {
-  const res = await supabase
-    .from("rewards")
-    .select("id,title,description")
-    .eq("id", CLOUD_SETTINGS_REWARD_ID)
-    .maybeSingle();
-
-  if (res.error) throw new Error(`loadParentPin: ${res.error.message}`);
-
-  const raw = res.data?.description || "";
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null;
-  } catch {
-    return null;
+    return {};
   }
 }
 
-async function saveParentPinToCloud(pin) {
+function saveOverdueTrack(track) {
+  localStorage.setItem(OVERDUE_TRACK_KEY, JSON.stringify(track));
+}
+
+const TASK_META_OPEN = "[[FPMETA]]";
+const TASK_META_CLOSE = "[[/FPMETA]]";
+
+function encodeTaskDesc(visibleDesc, meta = {}) {
+  const cleanDesc = (visibleDesc || "").trim();
   const payload = {
-    id: CLOUD_SETTINGS_REWARD_ID,
-    title: CLOUD_SETTINGS_TITLE,
-    description: JSON.stringify({ parentPin: pin }),
-    cost: 999999,
-    emoji: "🔐",
+    maxCoins: Math.max(1, Number(meta.maxCoins || 1)),
+    durationDays: Math.max(1, parseInt(meta.durationDays || 1, 10)),
   };
+  const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
+  return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
+}
 
-  const res = await supabase
-    .from("rewards")
-    .upsert(payload, { onConflict: "id" })
-    .select("id")
-    .single();
+function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
+  const fullDesc = String(rawDesc || "");
+  const start = fullDesc.indexOf(TASK_META_OPEN);
+  const end = fullDesc.indexOf(TASK_META_CLOSE);
+  let visibleDesc = fullDesc;
+  let meta = {};
 
-  if (res.error) throw new Error(`saveParentPin: ${res.error.message}`);
+  if (start !== -1 && end !== -1 && end > start) {
+    const jsonPart = fullDesc.slice(start + TASK_META_OPEN.length, end);
+    visibleDesc = `${fullDesc.slice(0, start)}${fullDesc.slice(end + TASK_META_CLOSE.length)}`.trim();
+    try {
+      meta = JSON.parse(jsonPart);
+    } catch {
+      meta = {};
+    }
+  }
+
+  const maxCoins = Math.max(1, Number(meta.maxCoins || fallbackCoins || 1));
+  const durationDays = Math.max(1, parseInt(meta.durationDays || 1, 10));
+  const baseDecay = Math.floor(maxCoins / durationDays);
+  const lastDecay = maxCoins - (baseDecay * (durationDays - 1));
+
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay };
+}
+
+function getTaskRemainingCoins(task, referenceDate = today) {
+  const info = parseTaskDesc(task.desc, task.coins);
+  const elapsedDays = Math.max(0, diffDays(task.date, referenceDate));
+  if (elapsedDays >= info.durationDays) return 0;
+  return Math.max(0, info.maxCoins - (info.baseDecay * elapsedDays));
 }
 
 const DAGEN   = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
@@ -1325,66 +1330,6 @@ function PinScreen({ child, theme: th, onSuccess, onCancel }) {
   );
 }
 
-
-function ParentPinOverlay({ expectedPin, onSuccess, onCancel }) {
-  const [entered, setEntered] = useState("");
-  const [wrong, setWrong] = useState(false);
-  const [error, setError] = useState("");
-  const PIN_LEN = 6;
-
-  const press = (digit) => {
-    if (entered.length >= PIN_LEN) return;
-    const next = entered + digit;
-    setEntered(next);
-    setWrong(false);
-    setError("");
-    if (next.length === PIN_LEN) {
-      setTimeout(() => {
-        if (next === String(expectedPin || "")) {
-          onSuccess();
-        } else {
-          setWrong(true);
-          setError("Oeps! Dat is niet de juiste oudercode 🙈");
-          setTimeout(() => { setEntered(""); setWrong(false); }, 700);
-        }
-      }, 120);
-    }
-  };
-
-  const del = () => { setEntered(e => e.slice(0,-1)); setWrong(false); setError(""); };
-  const KEYS = ["1","2","3","4","5","6","7","8","9"];
-
-  return (
-    <div className="pin-overlay" onClick={onCancel}>
-      <div className="pin-card" style={{ "--pin-pri": "#6c63ff", "--pin-l": "#ede9fe" }} onClick={e => e.stopPropagation()}>
-        <span className="pin-avatar">🔑</span>
-        <div className="pin-title" style={{ color: "#6c63ff" }}>Ouder login</div>
-        <div className="pin-sub">Voer de 6-cijferige oudercode in</div>
-
-        <div className="pin-dots">
-          {Array.from({ length: PIN_LEN }).map((_, i) => (
-            <div key={i} className={`pin-dot ${i < entered.length ? (wrong ? "wrong" : "filled") : ""}`}
-              style={i < entered.length && !wrong ? { "--pin-pri": "#6c63ff" } : {}} />
-          ))}
-        </div>
-
-        <div className="pin-error">{error}</div>
-
-        <div className="pin-grid">
-          {KEYS.map(k => (
-            <button key={k} className="pin-btn" onClick={() => press(k)}>{k}</button>
-          ))}
-          <div />
-          <button className="pin-btn zero" onClick={() => press("0")}>0</button>
-          <button className="pin-del" onClick={del}>⌫</button>
-        </div>
-
-        <button className="pin-cancel" onClick={onCancel}>← Terug</button>
-      </div>
-    </div>
-  );
-}
-
 // ─── FEEST OVERLAY ────────────────────────────────────────────────────────────
 const CONFETTI_COLORS = ["#6c63ff","#f59e0b","#10b981","#ef4444","#ec4899","#3b82f6","#fff","#ffd700"];
 const FEEST_MESSAGES = [
@@ -1460,49 +1405,50 @@ export default function App() {
   const coinTargetRef = useRef(null);
   const [showFeest, setShowFeest] = useState(false);
   const [pinChild,  setPinChild]  = useState(null);
-  const [showParentPin, setShowParentPin] = useState(false);
-  const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
 
   // ── Laad data uit Supabase bij opstarten ──
   useEffect(() => {
-    const localPin = getStoredParentPin();
-    setParentPin(localPin);
-
-    Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
-      .then(([dataRes, pinRes]) => {
-        if (dataRes.status === "fulfilled") {
-          setData(stripCloudSettingsFromData(dataRes.value));
-        } else {
-          console.error("Laad fout:", dataRes.reason);
-        }
-
-        if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
-          setParentPin(pinRes.value);
-          setStoredParentPin(pinRes.value);
-        } else if (pinRes.status === "rejected") {
-          console.error("Parent PIN cloud load fout:", pinRes.reason);
-        }
-
-        setLoading(false);
-      })
-      .catch(err => { console.error("Laad fout:", err); setLoading(false); });
+    loadAll()
+      .then(d => { setData(d); setLoading(false); })
+      .catch(err => { console.error('Laad fout:', err); setLoading(false); });
   }, []);
 
   // ── Helper: herlaad alle data na een wijziging ──
-  const reload = () => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
-    .then(([dataRes, pinRes]) => {
-      if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
-      else console.error(dataRes.reason);
+  const reload = () => loadAll().then(setData).catch(console.error);
 
-      if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
-        setParentPin(pinRes.value);
-        setStoredParentPin(pinRes.value);
+  // ── Verwerk gemiste taken: coins vervallen op basis van max coins ÷ duur ──
+  const processMissedTasks = useCallback(async () => {
+    if (loading || !data.tasks?.length) return;
+
+    let changed = false;
+
+    for (const task of data.tasks) {
+      if (task.status !== "pending" || !task.date || task.date >= today) continue;
+
+      const nextCoins = getTaskRemainingCoins(task, today);
+
+      if (nextCoins <= 0) {
+        await dbDelTask(task.id);
+        changed = true;
+        continue;
       }
-    })
-    .catch(console.error);
+
+      if (nextCoins !== Number(task.coins || 0)) {
+        const { error } = await supabase.from("tasks").update({ coins: nextCoins }).eq("id", task.id);
+        if (error) throw error;
+        changed = true;
+      }
+    }
+
+    if (changed) reload();
+  }, [data.tasks, loading]);
 
   // ── Realtime: luister naar wijzigingen in de database ──
   // Zodra een ander apparaat iets wijzigt, wordt de data hier automatisch bijgewerkt
+  useEffect(() => {
+    if (!loading) processMissedTasks().catch(err => console.error("Gemiste taken verwerken mislukt:", err));
+  }, [loading, data.tasks, processMissedTasks]);
+
   useEffect(() => {
     const channel = supabase
       .channel('familyplanner-sync')
@@ -1519,25 +1465,6 @@ export default function App() {
     addChild: async (c) => {
       const id = genId();
       await dbAddChild({ id, coins: 0, ...c });
-      reload();
-    },
-    updateChildPin: async (id, pin) => {
-      await supabase.from('children').update({ pin }).eq('id', id);
-      reload();
-    },
-    setChildCoins: async (id, coins) => {
-      await dbUpdateChildCoins(id, Math.max(0, Number(coins) || 0));
-      reload();
-    },
-    resetAllCoins: async () => {
-      await Promise.all(data.children.map(c => dbUpdateChildCoins(c.id, 0)));
-      reload();
-    },
-    updateParentPin: async (pin) => {
-      if (!/^\d{6}$/.test(pin || "")) return;
-      await saveParentPinToCloud(pin);
-      setStoredParentPin(pin);
-      setParentPin(pin);
       reload();
     },
     delChild: async (id) => {
@@ -1654,7 +1581,7 @@ export default function App() {
       <style>{CSS}</style>
       <div className="app">
         {screen === "home" && (
-          <HomeScreen data={data} onSelectKid={openChildScreen} onParent={() => setShowParentPin(true)} playDrumroll={playDrumroll} />
+          <HomeScreen data={data} onSelectKid={openChildScreen} onParent={() => setScreen("parent")} playDrumroll={playDrumroll} />
         )}
 
         {screen === "child" && (
@@ -1684,7 +1611,7 @@ export default function App() {
               <button className="back-btn" onClick={goHome}>← Terug</button>
             </header>
             <main className="main">
-              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} />
+              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} />
             </main>
           </>
         )}
@@ -1706,14 +1633,6 @@ export default function App() {
         )}
 
         {modal && <Modal modal={modal} setModal={setModal} data={data} db={db} />}
-
-        {showParentPin && (
-          <ParentPinOverlay
-            expectedPin={parentPin}
-            onCancel={() => setShowParentPin(false)}
-            onSuccess={() => { setShowParentPin(false); setScreen("parent"); }}
-          />
-        )}
 
         {pinChild && (() => {
           const child = data.children.find(c => c.id === pinChild);
@@ -2078,6 +1997,9 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayTasks = data.tasks.filter(t => t.childId === activeKid && t.date === today);
+  const missedTasks = data.tasks
+    .filter(t => t.childId === activeKid && t.status === "pending" && t.date < today)
+    .sort((a, b) => a.date.localeCompare(b.date));
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
   const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
@@ -2182,6 +2104,9 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
         <button className={`tab ${kidTab === "rewards" ? "on" : ""}`}
           style={kidTab === "rewards" ? { color: th.pri } : {}}
           onClick={() => setKidTab("rewards")}>{th.rewardIcon} Beloningen</button>
+        <button className={`tab ${kidTab === "missed" ? "on" : ""}`}
+          style={kidTab === "missed" ? { color: th.pri } : {}}
+          onClick={() => setKidTab("missed")}>⏰ Gemist{missedTasks.length ? ` (${missedTasks.length})` : ""}</button>
         <button className={`tab ${kidTab === "purchases" ? "on" : ""}`}
           style={kidTab === "purchases" ? { color: th.pri } : {}}
           onClick={() => setKidTab("purchases")}>🛍️ Mijn Aankopen</button>
@@ -2194,6 +2119,21 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             ? <div className="emp"><div className="ei">🎉</div><div className="et">Geen taken vandaag — vrij!</div></div>
             : todayTasks.map(t => (
                 <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
+              ))
+          }
+        </div>
+      )}
+
+      {kidTab === "missed" && (
+        <div>
+          <div className="st" style={{ marginBottom: 8, color: th.priD }}>Gemiste taken ⏰</div>
+          <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>
+            Het verval wordt per taak berekend als <strong>max coins ÷ aantal dagen</strong>. De taak blijft geldig op de startdag en de opgegeven dagen erna; zodra hij op <strong>0 coins</strong> komt, verdwijnt hij automatisch.
+          </div>
+          {missedTasks.length === 0
+            ? <div className="emp"><div className="ei">😌</div><div className="et">Geen gemiste taken — netjes!</div></div>
+            : missedTasks.map(t => (
+                <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} isMissed />
               ))
           }
         </div>
@@ -2274,13 +2214,14 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
 }
 
 // ─── KID TASK ──────────────────────────────────────────────────────────────────
-function KidTask({ task, db, playTaskDone, childName, theme }) {
+function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false }) {
   const done = task.status === "done";
   const appr = task.status === "approved";
   const [shake,    setShake]   = useState(false);
   const [showSlay, setShowSlay]= useState(false);
   const th = theme || DEFAULT_THEME;
   const isNevah = childName === "Nevah";
+  const taskMeta = parseTaskDesc(task.desc, task.coins);
 
   const handleCheck = () => {
     if (done || appr) return;
@@ -2319,7 +2260,13 @@ function KidTask({ task, db, playTaskDone, childName, theme }) {
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340" }}>{task.title}</div>
-        {task.desc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{task.desc}</div>}
+        {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
+        {isMissed && !done && !appr && (
+          <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 3 }}>
+            ⏰ Gemist sinds {task.date} · {taskMeta.baseDecay} coin{taskMeta.baseDecay === 1 ? "" : "s"} verval per gemiste dag
+            {taskMeta.lastDecay !== taskMeta.baseDecay ? ` · laatste verval ${taskMeta.lastDecay}` : ""}
+          </div>
+        )}
         {done && <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginTop: 3 }}>⏳ Wacht op goedkeuring van ouder</div>}
         {appr && <div style={{ fontSize: 11, color: th.pri, fontWeight: 700, marginTop: 3 }}>✅ Goedgekeurd! Coins ontvangen!</div>}
       </div>
@@ -2329,7 +2276,7 @@ function KidTask({ task, db, playTaskDone, childName, theme }) {
 }
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
-function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
+function ParentView({ data, db, tab, setTab, setModal }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
@@ -2363,7 +2310,6 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
           ["kids",    "👶 Kinderen"],
           ["rewards", "🎁 Beloningen"],
           ["purchases", `🛍️ Aankopen${pendingRedemptions.length ? ` (${pendingRedemptions.length})` : ""}`],
-          ["settings", "⚙️ Instellingen"],
         ].map(([k,l]) => (
           <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{l}</button>
         ))}
@@ -2373,7 +2319,6 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
       {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
       {tab === "rewards"   && <RewardsTab   data={data} db={db} setModal={setModal} />}
       {tab === "purchases" && <PurchasesTab data={data} db={db} getChild={getChild} />}
-      {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} />}
     </div>
   );
 }
@@ -2411,10 +2356,10 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
-                  {t.desc && <span>💬 {t.desc}</span>}
+                  {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
                 </div>
               </div>
-              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>🪙{t.coins}</span>
+              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>🪙{t.coins} <span style={{ fontSize: 11, color: "var(--t2)" }}>/ {parseTaskDesc(t.desc, t.coins).maxCoins}</span></span>
               <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button>
             </div>
           );
@@ -2450,12 +2395,6 @@ function ApproveTab({ data, db, pending, getChild }) {
 }
 
 function KidsTab({ data, db, setModal }) {
-  const [pinDrafts, setPinDrafts] = useState({});
-  const [coinDrafts, setCoinDrafts] = useState({});
-
-  const pinValue = (child) => pinDrafts[child.id] ?? child.pin ?? "";
-  const coinValue = (child) => coinDrafts[child.id] ?? String(child.coins ?? 0);
-
   return (
     <div>
       <div className="sh">
@@ -2471,98 +2410,10 @@ function KidsTab({ data, db, setModal }) {
             <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>
               {data.tasks.filter(t => t.childId === c.id && t.status === "approved").length} taken voltooid
             </div>
-
-            <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
-              <label className="fl">Nieuwe kind-PIN (4 cijfers)</label>
-              <input
-                className="fi"
-                inputMode="numeric"
-                maxLength={4}
-                value={pinValue(c)}
-                onChange={e => setPinDrafts(s => ({ ...s, [c.id]: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                placeholder="1234"
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button
-                className="btn bp bsm"
-                style={{ flex: 1 }}
-                onClick={() => db.updateChildPin(c.id, pinValue(c))}
-                disabled={!/^\d{4}$/.test(pinValue(c))}
-              >PIN opslaan</button>
-            </div>
-
-            <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
-              <label className="fl">Coins instellen</label>
-              <input
-                className="fi"
-                inputMode="numeric"
-                value={coinValue(c)}
-                onChange={e => setCoinDrafts(s => ({ ...s, [c.id]: e.target.value.replace(/\D/g, "") }))}
-                placeholder="0"
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-              <button className="btn bg bsm" style={{ flex: 1 }} onClick={() => db.setChildCoins(c.id, coinValue(c))}>Coins opslaan</button>
-              <button
-                className="btn bh bsm"
-                style={{ flex: 1 }}
-                onClick={() => { setCoinDrafts(s => ({ ...s, [c.id]: "0" })); db.setChildCoins(c.id, 0); }}
-              >Reset coins</button>
-            </div>
-
             <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delChild(c.id)}>Verwijder</button>
           </div>
         ))}
         {data.children.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">👶</div><div className="et">Nog geen kinderen</div></div>}
-      </div>
-    </div>
-  );
-}
-
-function SettingsTab({ data, db, parentPin }) {
-  const [pinDraft, setPinDraft] = useState(parentPin || DEFAULT_PARENT_PIN);
-
-  useEffect(() => {
-    setPinDraft(parentPin || DEFAULT_PARENT_PIN);
-  }, [parentPin]);
-
-  return (
-    <div>
-      <div className="sh">
-        <span className="st">Instellingen ⚙️</span>
-      </div>
-
-      <div className="g2">
-        <div className="card">
-          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🔐 Ouder login</div>
-          <div className="fg">
-            <label className="fl">Oudercode (6 cijfers)</label>
-            <input
-              className="fi"
-              inputMode="numeric"
-              maxLength={6}
-              value={pinDraft}
-              onChange={e => setPinDraft(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder="258000"
-            />
-          </div>
-          <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>
-            Deze oudercode wordt nu via Supabase gedeeld tussen apparaten. Lokaal wordt alleen een reservekopie bewaard.
-          </div>
-          <button className="btn bp" onClick={() => db.updateParentPin(pinDraft)} disabled={!/^\d{6}$/.test(pinDraft)}>6-cijferige code opslaan</button>
-        </div>
-
-        <div className="card">
-          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🪙 Coins beheren</div>
-          <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 14 }}>
-            Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.
-          </div>
-          <button className="btn bh" style={{ color: "var(--red)" }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
-          <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 10 }}>
-            Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -2708,7 +2559,19 @@ function AddTaskModal({ close, db, children }) {
   const [childId, setChildId] = useState(children[0]?.id || "");
   const [coins,   setCoins]   = useState(10);
   const [date,    setDate]    = useState(today);
-  const go = () => { if (title.trim() && childId) { db.addTask({ title: title.trim(), desc, childId, coins: +coins, date }); close(); } };
+  const [durationDays, setDurationDays] = useState(3);
+  const go = () => {
+    if (title.trim() && childId) {
+      db.addTask({
+        title: title.trim(),
+        desc: encodeTaskDesc(desc, { maxCoins: +coins, durationDays: +durationDays }),
+        childId,
+        coins: +coins,
+        date,
+      });
+      close();
+    }
+  };
   return (
     <div className="ov" onClick={close}>
       <div className="mo" onClick={e => e.stopPropagation()}>
@@ -2733,9 +2596,21 @@ function AddTaskModal({ close, db, children }) {
               </div>
             </div>
             <div className="fg">
-              <label className="fl">🪙 Coins te verdienen: <strong>{coins}</strong></label>
+              <label className="fl">⏳ Aantal dagen beschikbaar: <strong>{durationDays}</strong></label>
+              <input type="range" min="1" max="14" value={durationDays} onChange={e => setDurationDays(e.target.value)} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}>
+                <span>1 dag</span>
+                <span>{Math.floor(coins / Math.max(1, durationDays))} coin verval per gemiste dag{coins % Math.max(1, durationDays) !== 0 ? ` · laatste dag ${coins - (Math.floor(coins / Math.max(1, durationDays)) * (Math.max(1, durationDays) - 1))}` : ""}</span>
+                <span>14 dagen</span>
+              </div>
+            </div>
+            <div className="fg">
+              <label className="fl">🪙 Maximaal te verdienen coins: <strong>{coins}</strong></label>
               <input type="range" min="1" max="50" value={coins} onChange={e => setCoins(e.target.value)} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}><span>1</span><span>50</span></div>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
+              Start op <strong>{date}</strong> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 2 ? "" : "en"} · op dag {durationDays} na de start staat hij op 0 en verdwijnt hij.
             </div>
           </>
         }
