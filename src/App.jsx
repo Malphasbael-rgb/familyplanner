@@ -883,14 +883,39 @@ const getTheme = (name) => THEMES[name] || DEFAULT_THEME;
 // ─── WEB AUDIO SOUNDS ──────────────────────────────────────────────────────────
 function useSound() {
   const ctxRef = useRef(null);
-  const getCtx = () => {
-    if (!ctxRef.current) ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    return ctxRef.current;
-  };
 
-  const playTaskDone = useCallback(() => {
+  const getCtx = useCallback(async () => {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return null;
+    if (!ctxRef.current) ctxRef.current = new AudioCtor();
+    if (ctxRef.current.state === "suspended") {
+      try {
+        await ctxRef.current.resume();
+      } catch (e) {}
+    }
+    return ctxRef.current;
+  }, []);
+
+  useEffect(() => {
+    const unlockAudio = async () => {
+      await getCtx();
+    };
+
+    window.addEventListener("click", unlockAudio, { once: true });
+    window.addEventListener("touchstart", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+
+    return () => {
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    };
+  }, [getCtx]);
+
+  const playTaskDone = useCallback(async () => {
     try {
-      const ctx = getCtx();
+      const ctx = await getCtx();
+      if (!ctx) return;
       [[523.25, 0, 0.12], [659.25, 0.1, 0.12], [783.99, 0.2, 0.12], [1046.5, 0.32, 0.25]].forEach(([freq, delay, dur]) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -904,11 +929,12 @@ function useSound() {
         osc.start(t); osc.stop(t + dur + 0.05);
       });
     } catch(e) {}
-  }, []);
+  }, [getCtx]);
 
-  const playCoin = useCallback((index = 0) => {
+  const playCoin = useCallback(async (index = 0) => {
     try {
-      const ctx = getCtx();
+      const ctx = await getCtx();
+      if (!ctx) return;
       const delay = index * 0.12;
       // coin clink: short high sine with quick decay
       const freqs = [1318.5, 1567.98, 1760, 2093];
@@ -924,11 +950,12 @@ function useSound() {
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
       osc.start(t); osc.stop(t + 0.4);
     } catch(e) {}
-  }, []);
+  }, [getCtx]);
 
-  const playAllDone = useCallback(() => {
+  const playAllDone = useCallback(async () => {
     try {
-      const ctx = getCtx();
+      const ctx = await getCtx();
+      if (!ctx) return;
       // Vrolijke fanfare: oplopende akkoorden + trompet-achtig
       const notes = [
         // intro trompetstoot
@@ -976,15 +1003,16 @@ function useSound() {
         osc.start(t); osc.stop(t+dur+0.05);
       });
     } catch(e) {}
-  }, []);
+  }, [getCtx]);
 
   const playCoinBurst = useCallback((count = 6) => {
     for (let i = 0; i < count; i++) playCoin(i);
   }, [playCoin]);
 
-  const playSpend = useCallback(() => {
+  const playSpend = useCallback(async () => {
     try {
-      const ctx = getCtx();
+      const ctx = await getCtx();
+      if (!ctx) return;
       // Kassa-geluid: dalende tonen + kort geruis = geld dat weggaat
       [
         [880.00, 0.00, 0.07, "triangle", 0.28],
@@ -1015,11 +1043,12 @@ function useSound() {
       gain2.gain.exponentialRampToValueAtTime(0.001, t2 + 0.18);
       osc2.start(t2); osc2.stop(t2 + 0.22);
     } catch(e) {}
-  }, []);
+  }, [getCtx]);
 
-  const playDrumroll = useCallback((duration = 3000) => {
+  const playDrumroll = useCallback(async (duration = 3000) => {
     try {
-      const ctx = getCtx();
+      const ctx = await getCtx();
+      if (!ctx) return;
       const dur = duration / 1000;
       const t0  = ctx.currentTime + 0.05;
 
@@ -1073,7 +1102,7 @@ function useSound() {
       oscEnd.start(t0 + dur); oscEnd.stop(t0 + dur + 0.2);
 
     } catch(e) {}
-  }, []);
+  }, [getCtx]);
 
   return { playTaskDone, playCoin, playCoinBurst, playAllDone, playSpend, playDrumroll };
 }
