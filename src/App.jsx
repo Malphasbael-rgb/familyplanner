@@ -1565,7 +1565,7 @@ export default function App() {
   }, []);
 
   // ── Helper: herlaad alle data na een wijziging ──
-  const reload = () => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
+  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
     .then(([dataRes, pinRes]) => {
       if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
       else console.error(dataRes.reason);
@@ -1574,7 +1574,7 @@ export default function App() {
         setStoredParentPin(pinRes.value);
       }
     })
-    .catch(console.error);
+    .catch(console.error), []);
 
   // ── Verwerk gemiste taken: coins vervallen op basis van max coins ÷ duur ──
   const processMissedTasks = useCallback(async () => {
@@ -1618,8 +1618,27 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'redemptions' }, () => reload())
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
-  }, []);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reload();
+    };
+    const onFocus = () => reload();
+    const onPageShow = () => reload();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') reload();
+    }, 8000);
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onPageShow);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onPageShow);
+      supabase.removeChannel(channel);
+    };
+  }, [reload]);
 
   const db = {
     addChild: async (c) => {
