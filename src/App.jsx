@@ -11,35 +11,11 @@ const getTodayISO = () => new Date().toISOString().split("T")[0];
 const today = getTodayISO();
 const genId = () => Math.random().toString(36).substr(2, 9);
 const PARENT_PIN_KEY = "familyplanner-parent-pin-v1";
-const LEVEL_THRESHOLDS_KEY = "familyplanner-level-thresholds-v1";
 const DEFAULT_PARENT_PIN = "258000";
-const DEFAULT_LEVEL_THRESHOLDS = [0, 25, 60, 110, 180, 270, 380, 520, 700, 920];
 const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
 const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
 const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
 const COMPLETED_HISTORY_DAYS = 14;
-const ACHIEVEMENT_SEEN_KEY = "familyplanner-achievement-seen-v1";
-const STREAK_MILESTONES = [3, 7, 14, 30];
-const DAY_PART_ORDER = ["allDay", "morning", "afternoon", "evening"];
-const DAY_PART_INFO = {
-  allDay: { emoji: "🗓️", label: "Hele dag" },
-  morning: { emoji: "🌅", label: "Ochtend" },
-  afternoon: { emoji: "☀️", label: "Middag" },
-  evening: { emoji: "🌙", label: "Avond" },
-};
-
-const getSeenAchievements = () => {
-  try { return JSON.parse(localStorage.getItem(ACHIEVEMENT_SEEN_KEY) || "[]"); } catch { return []; }
-};
-const hasSeenAchievement = (id) => getSeenAchievements().includes(id);
-const markAchievementSeen = (id) => {
-  try {
-    const set = new Set(getSeenAchievements());
-    set.add(id);
-    localStorage.setItem(ACHIEVEMENT_SEEN_KEY, JSON.stringify([...set]));
-  } catch {}
-};
-
 
 const getStoredParentPin = () => {
   try {
@@ -52,45 +28,6 @@ const getStoredParentPin = () => {
 const setStoredParentPin = (pin) => {
   try { localStorage.setItem(PARENT_PIN_KEY, pin); } catch {}
 };
-const normalizeDayPart = (value) => DAY_PART_INFO[value] ? value : "allDay";
-const getDayPartInfo = (value) => DAY_PART_INFO[normalizeDayPart(value)];
-
-const getCurrentMinutes = () => {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
-};
-const isDayPartVisibleNow = (dayPart) => {
-  const part = normalizeDayPart(dayPart);
-  const minutes = getCurrentMinutes();
-  if (part === "allDay") return true;
-  if (part === "morning") return minutes >= 6 * 60;
-  if (part === "afternoon") return minutes >= 12 * 60;
-  if (part === "evening") return minutes >= 17 * 60;
-  return true;
-};
-const normalizeLevelThresholds = (input) => {
-  const base = Array.isArray(input) ? input : DEFAULT_LEVEL_THRESHOLDS;
-  const nums = base
-    .map(v => Math.max(0, parseInt(v, 10) || 0))
-    .slice(0, 20);
-  if (!nums.length) return [...DEFAULT_LEVEL_THRESHOLDS];
-  nums[0] = 0;
-  for (let i = 1; i < nums.length; i++) {
-    nums[i] = Math.max(nums[i], nums[i - 1] + 1);
-  }
-  return nums;
-};
-const getStoredLevelThresholds = () => {
-  try {
-    return normalizeLevelThresholds(JSON.parse(localStorage.getItem(LEVEL_THRESHOLDS_KEY) || "null"));
-  } catch {
-    return [...DEFAULT_LEVEL_THRESHOLDS];
-  }
-};
-const setStoredLevelThresholds = (thresholds) => {
-  try { localStorage.setItem(LEVEL_THRESHOLDS_KEY, JSON.stringify(normalizeLevelThresholds(thresholds))); } catch {}
-};
-
 const isCloudSettingsReward = (r) => r?.id === CLOUD_SETTINGS_REWARD_ID || r?.title === CLOUD_SETTINGS_TITLE;
 const stripCloudSettingsFromData = (d) => ({
   ...d,
@@ -103,42 +40,22 @@ const getPenaltyReason = (r) => {
   const title = String(r?.rewardTitle || "");
   return title.replace(/^Ecoins afgepakt\s*[—-]\s*/i, "").trim() || "Geen reden opgegeven";
 };
-async function fetchCloudSettings() {
+async function fetchParentPinFromCloud() {
   const res = await supabase.from("rewards").select("id,title,description").eq("id", CLOUD_SETTINGS_REWARD_ID).maybeSingle();
-  if (res.error) throw new Error(`loadSettings: ${res.error.message}`);
+  if (res.error) throw new Error(`loadParentPin: ${res.error.message}`);
   const raw = res.data?.description || "";
-  if (!raw) return {};
+  if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return {
-      parentPin: /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null,
-      levelThresholds: Array.isArray(parsed?.levelThresholds) ? normalizeLevelThresholds(parsed.levelThresholds) : null,
-    };
+    return /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null;
   } catch {
-    return {};
+    return null;
   }
 }
-async function saveCloudSettings(settings = {}) {
-  const current = await fetchCloudSettings().catch(() => ({}));
-  const payload = {
-    id: CLOUD_SETTINGS_REWARD_ID,
-    title: CLOUD_SETTINGS_TITLE,
-    description: JSON.stringify({
-      parentPin: /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : (current.parentPin || getStoredParentPin()),
-      levelThresholds: normalizeLevelThresholds(settings.levelThresholds || current.levelThresholds || getStoredLevelThresholds()),
-    }),
-    cost: 999999,
-    emoji: "🔐"
-  };
-  const res = await supabase.from("rewards").upsert(payload, { onConflict: "id" }).select("id").single();
-  if (res.error) throw new Error(`saveSettings: ${res.error.message}`);
-}
-async function fetchParentPinFromCloud() {
-  const settings = await fetchCloudSettings();
-  return settings.parentPin || null;
-}
 async function saveParentPinToCloud(pin) {
-  return saveCloudSettings({ parentPin: pin });
+  const payload = { id: CLOUD_SETTINGS_REWARD_ID, title: CLOUD_SETTINGS_TITLE, description: JSON.stringify({ parentPin: pin }), cost: 999999, emoji: "🔐" };
+  const res = await supabase.from("rewards").upsert(payload, { onConflict: "id" }).select("id").single();
+  if (res.error) throw new Error(`saveParentPin: ${res.error.message}`);
 }
 
 function diffDays(fromDate, toDate) {
@@ -172,8 +89,6 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     recurrenceType: ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none",
     isTemplate: !!meta.isTemplate,
     recurrenceSourceId: typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null,
-    autoApprove: !!meta.autoApprove,
-    dayPart: normalizeDayPart(meta.dayPart),
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -205,10 +120,8 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const recurrenceType = ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none";
   const isTemplate = !!meta.isTemplate;
   const recurrenceSourceId = typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null;
-  const autoApprove = !!meta.autoApprove;
-  const dayPart = normalizeDayPart(meta.dayPart);
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, autoApprove, dayPart };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -221,8 +134,6 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     recurrenceType: Object.prototype.hasOwnProperty.call(patch, "recurrenceType") ? patch.recurrenceType : info.recurrenceType,
     isTemplate: Object.prototype.hasOwnProperty.call(patch, "isTemplate") ? patch.isTemplate : info.isTemplate,
     recurrenceSourceId: Object.prototype.hasOwnProperty.call(patch, "recurrenceSourceId") ? patch.recurrenceSourceId : info.recurrenceSourceId,
-    autoApprove: Object.prototype.hasOwnProperty.call(patch, "autoApprove") ? patch.autoApprove : info.autoApprove,
-    dayPart: Object.prototype.hasOwnProperty.call(patch, "dayPart") ? patch.dayPart : info.dayPart,
   });
 }
 
@@ -283,29 +194,16 @@ function getRecurringLabel(task) {
   return "Eenmalig";
 }
 
-function getRecurringPlannedDates(templateTask) {
-  if (!isRecurringTemplateTask(templateTask) || !templateTask?.date) return [];
+function getRecurringOccurrenceDate(templateTask, referenceDate = getTodayISO()) {
+  if (!isRecurringTemplateTask(templateTask)) return null;
   const info = parseTaskDesc(templateTask.desc, templateTask.coins);
-  const start = new Date(`${templateTask.date}T00:00:00`);
-  if (Number.isNaN(start.getTime())) return [];
-
-  if (info.recurrenceType === "daily") {
-    return Array.from({ length: 14 }, (_, idx) => {
-      const d = new Date(start);
-      d.setDate(d.getDate() + idx);
-      return d.toISOString().split("T")[0];
-    });
-  }
-
+  if (!templateTask.date || templateTask.date > referenceDate) return null;
+  if (info.recurrenceType === "daily") return referenceDate;
   if (info.recurrenceType === "weekly") {
-    return Array.from({ length: 4 }, (_, idx) => {
-      const d = new Date(start);
-      d.setDate(d.getDate() + (idx * 7));
-      return d.toISOString().split("T")[0];
-    });
+    const daysBetween = diffDays(templateTask.date, referenceDate);
+    return daysBetween >= 0 && daysBetween % 7 === 0 ? referenceDate : null;
   }
-
-  return [];
+  return null;
 }
 
 const REWARD_META_OPEN = "[[FPREWARD]]";
@@ -314,9 +212,7 @@ const REWARD_META_CLOSE = "[[/FPREWARD]]";
 function encodeRewardDesc(visibleDesc, meta = {}) {
   const cleanDesc = (visibleDesc || "").trim();
   const targetChildIds = Array.isArray(meta.targetChildIds) ? meta.targetChildIds.filter(Boolean) : [];
-  const rewardType = meta.rewardType === "goal" ? "goal" : "reward";
-  const goalTarget = Math.max(1, Number(meta.goalTarget || meta.goalCost || 1));
-  const payload = { targetChildIds, rewardType, goalTarget };
+  const payload = { targetChildIds };
   const metaBlock = `${REWARD_META_OPEN}${JSON.stringify(payload)}${REWARD_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
 }
@@ -339,13 +235,7 @@ function parseRewardDesc(rawDesc = "") {
   }
 
   const targetChildIds = Array.isArray(meta.targetChildIds) ? meta.targetChildIds.filter(Boolean) : [];
-  const rewardType = meta.rewardType === "goal" ? "goal" : "reward";
-  const goalTarget = Math.max(1, Number(meta.goalTarget || meta.goalCost || 1));
-  return { visibleDesc, targetChildIds, rewardType, goalTarget };
-}
-
-function isGoalReward(reward) {
-  return parseRewardDesc(reward?.desc || "").rewardType === "goal";
+  return { visibleDesc, targetChildIds };
 }
 
 function rewardVisibleForChild(reward, childId) {
@@ -361,112 +251,6 @@ function getRewardTargetLabel(reward, children = []) {
     .filter(Boolean)
     .map(c => `${c.avatar} ${c.name}`);
   return names.length ? names.join(" · ") : "Specifieke kinderen";
-}
-
-function isBonusRedemption(r) {
-  return Number(r?.cost || 0) > 0 && String(r?.rewardId || "").startsWith("bonus:");
-}
-
-function getBonusLabel(r) {
-  const raw = String(r?.rewardTitle || "");
-  return raw.replace(/^Bonus\s*[—-]\s*/i, "").trim() || "Bonus";
-}
-
-function getWeekStartISO(referenceDate = getTodayISO()) {
-  const d = new Date(`${referenceDate}T00:00:00`);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().split("T")[0];
-}
-
-function addDaysISO(isoDate, days) {
-  const d = new Date(`${isoDate}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
-}
-
-function buildChildStats(data, childId, referenceDate = getTodayISO(), customLevelThresholds = DEFAULT_LEVEL_THRESHOLDS) {
-  const childTasks = (data?.tasks || []).filter(t => t.childId === childId && !isRecurringTemplateTask(t));
-  const approvedTasks = childTasks.filter(t => t.status === "approved");
-  const doneTasks = childTasks.filter(t => t.status === "done");
-  const pendingTasks = childTasks.filter(t => t.status === "pending");
-
-  const approvedByDate = approvedTasks.reduce((acc, t) => {
-    const anchor = getTaskCompletedAnchorDate(t) || t.date;
-    if (anchor) acc[anchor] = (acc[anchor] || 0) + 1;
-    return acc;
-  }, {});
-  let streak = 0;
-  let cursor = referenceDate;
-  while (approvedByDate[cursor] > 0) {
-    streak += 1;
-    cursor = addDaysISO(cursor, -1);
-  }
-
-  const weekStart = getWeekStartISO(referenceDate);
-  const weekEnd = addDaysISO(weekStart, 6);
-  const inWeek = (iso) => iso >= weekStart && iso <= weekEnd;
-
-  const weekApproved = approvedTasks.filter(t => {
-    const anchor = getTaskCompletedAnchorDate(t) || t.date;
-    return anchor && inWeek(anchor);
-  });
-  const doneInWeek = doneTasks.filter(t => {
-    const anchor = getTaskCompletedAnchorDate(t) || t.date;
-    return anchor && inWeek(anchor);
-  });
-  const weekPending = pendingTasks.filter(t => t.date >= weekStart && t.date <= weekEnd);
-
-  const childReds = (data?.redemptions || []).filter(r => r.childId === childId);
-  const positiveBonuses = childReds.filter(r => isBonusRedemption(r) && r.status === "approved");
-  const penalties = childReds.filter(r => isPenaltyRedemption(r));
-
-  const weekEarnedFromTasks = weekApproved.reduce((s, t) => s + Number(t.coins || 0), 0);
-  const weekBonusCoins = positiveBonuses.filter(r => inWeek(r.date)).reduce((s, r) => s + Number(r.cost || 0), 0);
-  const weekPenaltyCoins = penalties.filter(r => inWeek(r.date)).reduce((s, r) => s + Math.abs(Number(r.cost || 0)), 0);
-
-  const totalEarnedEver = approvedTasks.reduce((s, t) => s + Number(t.coins || 0), 0) + positiveBonuses.reduce((s, r) => s + Number(r.cost || 0), 0);
-  const totalApprovedTasks = approvedTasks.length;
-
-  const levelThresholds = normalizeLevelThresholds(customLevelThresholds);
-  let level = 1;
-  for (let i = 0; i < levelThresholds.length; i++) {
-    if (totalEarnedEver >= levelThresholds[i]) level = i + 1;
-  }
-  const currentLevelStart = levelThresholds[Math.max(0, level - 1)] || 0;
-  const nextLevelTarget = levelThresholds[level] || (currentLevelStart + 250);
-  const levelProgress = Math.min(100, Math.round(((totalEarnedEver - currentLevelStart) / Math.max(1, nextLevelTarget - currentLevelStart)) * 100));
-
-  const badgeCandidates = [
-    { id: "first-task", icon: "🌟", title: "Eerste stap", desc: "Je eerste taak goedgekeurd", unlocked: totalApprovedTasks >= 1 },
-    { id: "task-10", icon: "🛠️", title: "Doorzetter", desc: "10 taken goedgekeurd", unlocked: totalApprovedTasks >= 10 },
-    { id: "task-25", icon: "🏆", title: "Taakmachine", desc: "25 taken goedgekeurd", unlocked: totalApprovedTasks >= 25 },
-    { id: "streak-3", icon: "🔥", title: "Vlammetje", desc: "3 dagen streak", unlocked: streak >= 3 },
-    { id: "streak-7", icon: "⚡", title: "Onstuitbaar", desc: "7 dagen streak", unlocked: streak >= 7 },
-    { id: "coins-50", icon: "🪙", title: "Spaarder", desc: "50 coins ooit verdiend", unlocked: totalEarnedEver >= 50 },
-    { id: "coins-150", icon: "💎", title: "Schatkist", desc: "150 coins ooit verdiend", unlocked: totalEarnedEver >= 150 },
-    { id: "first-reward", icon: "🎁", title: "Ingewisseld", desc: "Eerste beloning aangevraagd", unlocked: childReds.some(r => !isPenaltyRedemption(r) && !isBonusRedemption(r)) },
-  ];
-
-  return {
-    streak,
-    weekStart,
-    weekEnd,
-    weekApprovedCount: weekApproved.length,
-    weekDoneCount: doneInWeek.length,
-    weekPendingCount: weekPending.length,
-    weekEarnedCoins: weekEarnedFromTasks + weekBonusCoins,
-    weekPenaltyCoins,
-    totalEarnedEver,
-    totalApprovedTasks,
-    level,
-    levelProgress,
-    nextLevelTarget,
-    currentLevelStart,
-    badges: badgeCandidates.filter(b => b.unlocked),
-    allBadges: badgeCandidates,
-  };
 }
 
 const DAGEN   = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
@@ -1861,72 +1645,6 @@ function FeestOverlay({ childName, onClose }) {
   );
 }
 
-
-const ACHIEVEMENT_MESSAGES = {
-  level: [
-    { emoji: "⬆️🏆⬆️", title: "LEVEL UP!", getSub: (name, value) => `${name}, jij bent nu level ${value}! Wat een baas! ✨` },
-    { emoji: "👑🌟👑", title: "Nieuw level bereikt!", getSub: (name, value) => `${name}, level ${value} is binnen. Koningswerk!` },
-  ],
-  streak: [
-    { emoji: "🔥🎉🔥", title: "Streak behaald!", getSub: (name, value) => `${name}, jij hebt een streak van ${value} dagen!` },
-    { emoji: "⚡🏅⚡", title: "Wat een reeks!", getSub: (name, value) => `${value} dagen streak voor ${name}. Lekker bezig!` },
-  ],
-};
-
-function AchievementOverlay({ event, onClose }) {
-  const pool = ACHIEVEMENT_MESSAGES[event?.type] || ACHIEVEMENT_MESSAGES.level;
-  const msg = pool[Math.abs(String(event?.id || 'x').split('').reduce((a,c)=>a+c.charCodeAt(0),0)) % pool.length];
-  const pieces = Array.from({ length: 80 }, (_, i) => ({
-    id: i,
-    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-    left: Math.random() * 100,
-    dur:  2.2 + Math.random() * 1.6,
-    delay: Math.random() * 0.9,
-    x: (Math.random() - 0.5) * 360,
-    rot: Math.random() * 1080 - 540,
-    wide: Math.random() > 0.4,
-  }));
-
-  if (!event) return null;
-
-  return (
-    <>
-      <div className="feest-confetti">
-        {pieces.map(p => (
-          <div key={p.id} className="confetti-piece" style={{
-            left: `${p.left}%`,
-            background: p.color,
-            width: p.wide ? 15 : 8,
-            height: p.wide ? 15 : 18,
-            borderRadius: p.wide ? "50%" : 3,
-            "--cf-dur":   `${p.dur}s`,
-            "--cf-delay": `${p.delay}s`,
-            "--cf-x":     `${p.x}px`,
-            "--cf-rot":   `${p.rot}deg`,
-          }} />
-        ))}
-      </div>
-      <div className="feest-overlay" onClick={onClose}>
-        <div className="feest-backdrop" />
-        <div className="feest-card" style={{ maxWidth: 520, padding: '34px 28px 30px', borderWidth: 4 }} onClick={e => e.stopPropagation()}>
-          <div className="feest-emoji-row" style={{ fontSize: 42 }}>{msg.emoji}</div>
-          <div className="feest-title" style={{ fontSize: 34 }}>{msg.title}</div>
-          <div className="feest-sub" style={{ fontSize: 20, lineHeight: 1.4, marginBottom: 12 }}>{msg.getSub(event.childName, event.value)}</div>
-          <div style={{ display:'inline-flex', alignItems:'center', gap:10, margin:'8px auto 18px', padding:'12px 18px', borderRadius:999, background:'rgba(255,255,255,.72)', border:'2px solid rgba(108,99,255,.18)', fontWeight:900, fontSize: event.type === 'level' ? 24 : 22, color:'#5b50ff' }}>
-            {event.type === 'level' ? <>⭐ Level {event.value}</> : <>🔥 {event.value} dagen op rij</>}
-          </div>
-          {event.type === 'streak' && event.bonus ? (
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#0f766e', marginBottom: 12 }}>+{event.bonus} bonuscoins verdiend 🪙</div>
-          ) : null}
-          <button className="btn bp" style={{ fontSize:18, padding:"12px 28px", marginTop:6 }} onClick={onClose}>
-            🎉 Verder
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ─── APP ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,    setScreen]    = useState("home");
@@ -1934,7 +1652,7 @@ export default function App() {
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(null);
   const [activeKid, setActiveKid] = useState(null);
-  const [tab,       setTab]       = useState("dashboard");
+  const [tab,       setTab]       = useState("tasks");
   const [kidTab,    setKidTab]    = useState("tasks");
   const [prevApproved, setPrevApproved] = useState({});
   const [showCoins,    setShowCoins]    = useState(null);
@@ -1942,81 +1660,38 @@ export default function App() {
   const { playTaskDone, playCoinBurst, playAllDone, playSpend, playDrumroll } = useSound();
   const coinTargetRef = useRef(null);
   const [showFeest, setShowFeest] = useState(false);
-  const [achievementOverlay, setAchievementOverlay] = useState(null);
-  const prevKidStatsRef = useRef({});
   const [pinChild,  setPinChild]  = useState(null);
   const [pinParent, setPinParent] = useState(false);
   const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
-  const [levelThresholds, setLevelThresholds] = useState(DEFAULT_LEVEL_THRESHOLDS);
 
   // ── Laad data uit Supabase bij opstarten ──
   useEffect(() => {
-    Promise.allSettled([loadAll(), fetchCloudSettings()])
-      .then(([dataRes, settingsRes]) => {
+    Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
+      .then(([dataRes, pinRes]) => {
         if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
         else console.error("Laad fout:", dataRes.reason);
-
-        const settings = settingsRes.status === "fulfilled" ? (settingsRes.value || {}) : {};
-        const nextParentPin = /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : getStoredParentPin();
-        const nextThresholds = Array.isArray(settings.levelThresholds) ? normalizeLevelThresholds(settings.levelThresholds) : getStoredLevelThresholds();
-        setParentPin(nextParentPin);
-        setStoredParentPin(nextParentPin);
-        setLevelThresholds(nextThresholds);
-        setStoredLevelThresholds(nextThresholds);
+        if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
+          setParentPin(pinRes.value);
+          setStoredParentPin(pinRes.value);
+        } else {
+          setParentPin(getStoredParentPin());
+        }
         setLoading(false);
       })
-      .catch(err => {
-        console.error("Laad fout:", err);
-        setParentPin(getStoredParentPin());
-        setLevelThresholds(getStoredLevelThresholds());
-        setLoading(false);
-      });
+      .catch(err => { console.error("Laad fout:", err); setParentPin(getStoredParentPin()); setLoading(false); });
   }, []);
 
   // ── Helper: herlaad alle data na een wijziging ──
-  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchCloudSettings()])
-    .then(([dataRes, settingsRes]) => {
+  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
+    .then(([dataRes, pinRes]) => {
       if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
       else console.error(dataRes.reason);
-
-      const settings = settingsRes.status === "fulfilled" ? (settingsRes.value || {}) : {};
-      const nextParentPin = /^\d{6}$/.test(settings.parentPin || "") ? settings.parentPin : getStoredParentPin();
-      const nextThresholds = normalizeLevelThresholds(settings.levelThresholds || getStoredLevelThresholds());
-      setParentPin(nextParentPin);
-      setStoredParentPin(nextParentPin);
-      setLevelThresholds(nextThresholds);
-      setStoredLevelThresholds(nextThresholds);
+      if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
+        setParentPin(pinRes.value);
+        setStoredParentPin(pinRes.value);
+      }
     })
     .catch(console.error), []);
-
-  const cleanupRecurringDuplicateTasks = useCallback(async () => {
-    if (loading || !data.tasks?.length) return;
-
-    const seen = new Map();
-    const toDelete = [];
-
-    for (const task of data.tasks) {
-      if (isRecurringTemplateTask(task)) continue;
-      const info = parseTaskDesc(task.desc, task.coins);
-      const visibleDesc = info.visibleDesc || "";
-      const recurrenceMarker = info.recurrenceSourceId || getTaskRecurrenceType(task);
-      if (!recurrenceMarker || recurrenceMarker === "none") continue;
-      const key = [task.childId, task.date, task.title, visibleDesc, recurrenceMarker].join("||");
-      if (!seen.has(key)) {
-        seen.set(key, task);
-      } else {
-        toDelete.push(task.id);
-      }
-    }
-
-    if (!toDelete.length) return;
-
-    for (const id of toDelete) {
-      await dbDelTask(id);
-    }
-
-    await reload();
-  }, [data.tasks, loading, reload]);
 
   const processRecurringTemplates = useCallback(async () => {
     if (loading || !data.tasks?.length) return;
@@ -2024,61 +1699,41 @@ export default function App() {
     const templates = data.tasks.filter(isRecurringTemplateTask);
     if (!templates.length) return;
 
+    const referenceDate = getTodayISO();
     let changed = false;
 
     for (const template of templates) {
+      const occurrenceDate = getRecurringOccurrenceDate(template, referenceDate);
+      if (!occurrenceDate) continue;
       const info = parseTaskDesc(template.desc, template.coins);
-      const plannedDates = getRecurringPlannedDates(template);
-      if (!plannedDates.length) continue;
-
-      const generated = data.tasks.filter((task) => {
-        if (task.id === template.id || isRecurringTemplateTask(task)) return false;
+      const alreadyExists = data.tasks.some((task) => {
+        if (task.id === template.id) return false;
         const taskInfo = parseTaskDesc(task.desc, task.coins);
-        return task.childId === template.childId && taskInfo.recurrenceSourceId === template.id;
+        return !isRecurringTemplateTask(task)
+          && task.childId === template.childId
+          && task.date === occurrenceDate
+          && taskInfo.recurrenceSourceId === template.id;
       });
+      if (alreadyExists) continue;
 
-      const byDate = new Map();
-      for (const task of generated) {
-        const list = byDate.get(task.date) || [];
-        list.push(task);
-        byDate.set(task.date, list);
-      }
-
-      for (const [dateKey, list] of byDate.entries()) {
-        if (list.length <= 1) continue;
-        const extras = list.slice(1);
-        for (const dupe of extras) {
-          await dbDelTask(dupe.id);
-          changed = true;
-        }
-        byDate.set(dateKey, [list[0]]);
-      }
-
-      for (const occurrenceDate of plannedDates) {
-        const existingForDate = byDate.get(occurrenceDate) || [];
-        if (existingForDate.length) continue;
-
-        await dbAddTask({
-          id: genId(),
-          childId: template.childId,
-          title: template.title,
-          description: encodeTaskDesc(info.visibleDesc, {
-            maxCoins: info.maxCoins,
-            durationDays: info.durationDays,
-            recurrenceType: info.recurrenceType,
-            recurrenceSourceId: template.id,
-            isTemplate: false,
-            autoApprove: info.autoApprove,
-            dayPart: info.dayPart,
-            doneOn: null,
-            approvedOn: null,
-          }),
-          coins: info.maxCoins,
-          date: occurrenceDate,
-          status: 'pending',
-        });
-        changed = true;
-      }
+      await dbAddTask({
+        id: genId(),
+        childId: template.childId,
+        title: template.title,
+        description: encodeTaskDesc(info.visibleDesc, {
+          maxCoins: info.maxCoins,
+          durationDays: info.durationDays,
+          recurrenceType: info.recurrenceType,
+          recurrenceSourceId: template.id,
+          isTemplate: false,
+          doneOn: null,
+          approvedOn: null,
+        }),
+        coins: info.maxCoins,
+        date: occurrenceDate,
+        status: 'pending',
+      });
+      changed = true;
     }
 
     if (changed) reload();
@@ -2219,16 +1874,6 @@ export default function App() {
       setParentPin(pin);
       reload();
     },
-    updateLevelThresholds: async (thresholds) => {
-      const normalized = normalizeLevelThresholds(thresholds);
-      setStoredLevelThresholds(normalized);
-      setLevelThresholds(normalized);
-      try {
-        await saveCloudSettings({ levelThresholds: normalized });
-      } catch (err) {
-        console.error("Levelvereisten opslaan mislukt", err);
-      }
-    },
     delChild: async (id) => {
       await dbDelChild(id);
       reload();
@@ -2245,20 +1890,8 @@ export default function App() {
     markDone: async (id) => {
       const task = data.tasks.find(t => t.id === id);
       if (!task) return;
-      const info = parseTaskDesc(task.desc, task.coins);
-      const todayIso = getTodayISO();
-      const shouldAutoApprove = info.recurrenceType !== "none" && !!info.autoApprove;
-      const nextStatus = shouldAutoApprove ? 'approved' : 'done';
-      const description = updateTaskDescMeta(task.desc, task.coins, {
-        doneOn: todayIso,
-        approvedOn: shouldAutoApprove ? todayIso : null,
-        autoApprove: info.autoApprove,
-      });
-      await supabase.from('tasks').update({ status: nextStatus, description }).eq('id', id);
-      if (shouldAutoApprove) {
-        const child = data.children.find(c => c.id === task.childId);
-        if (child) await dbUpdateChildCoins(child.id, child.coins + task.coins);
-      }
+      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: getTodayISO(), approvedOn: null });
+      await supabase.from('tasks').update({ status: 'done', description }).eq('id', id);
       reload();
     },
     approve: async (id) => {
@@ -2313,42 +1946,6 @@ export default function App() {
     },
   };
 
-
-  useEffect(() => {
-    if (loading || !data.children?.length) return;
-    let cancelled = false;
-    const run = async () => {
-      const todayIso = getTodayISO();
-      const yesterday = addDaysISO(todayIso, -1);
-      for (const child of data.children) {
-        const stats = buildChildStats(data, child.id, todayIso, levelThresholds);
-        if (![3, 7, 14].includes(stats.streak)) continue;
-        const bonusAmount = stats.streak === 3 ? 5 : stats.streak === 7 ? 10 : 20;
-        const rewardId = `bonus:streak:${child.id}:${todayIso}:${stats.streak}`;
-        const already = data.redemptions.some(r => r.rewardId === rewardId);
-        const hasApprovedToday = data.tasks.some(t => t.childId === child.id && t.status === "approved" && (getTaskCompletedAnchorDate(t) || t.date) === todayIso);
-        const hadYesterday = data.tasks.some(t => t.childId === child.id && t.status === "approved" && (getTaskCompletedAnchorDate(t) || t.date) === yesterday);
-        if (!already && hasApprovedToday && (stats.streak === 3 ? hadYesterday : true)) {
-          await dbUpdateChildCoins(child.id, (child.coins || 0) + bonusAmount);
-          await supabase.from('redemptions').insert({
-            id: genId(),
-            child_id: child.id,
-            reward_id: rewardId,
-            reward_title: `Bonus — ${stats.streak} dagen streak`,
-            reward_emoji: '🔥',
-            cost: bonusAmount,
-            date: todayIso,
-            status: 'approved'
-          });
-          if (!cancelled) reload();
-          break;
-        }
-      }
-    };
-    run().catch(console.error);
-    return () => { cancelled = true; };
-  }, [data.children, data.tasks, data.redemptions, loading, reload]);
-
   // When a child opens their screen, show PIN first if set
   const openChildScreen = (id) => {
     const child = data.children.find(c => c.id === id);
@@ -2368,7 +1965,6 @@ export default function App() {
       return sum + (t ? t.coins : 0);
     }, 0);
     setPrevApproved(p => ({ ...p, [id]: currentApproved }));
-    prevKidStatsRef.current[id] = buildChildStats(data, id, getTodayISO(), levelThresholds);
     setActiveKid(id);
     setKidTab("tasks");
     setScreen("child");
@@ -2381,34 +1977,6 @@ export default function App() {
   };
 
   const goHome = () => { setScreen("home"); setActiveKid(null); };
-
-  useEffect(() => {
-    if (loading || !activeKid || screen !== "child") return;
-    const todayIso = getTodayISO();
-    const stats = buildChildStats(data, activeKid, todayIso, levelThresholds);
-    const childName = data.children.find(c => c.id === activeKid)?.name || "";
-    const prev = prevKidStatsRef.current[activeKid] || { level: stats.level, streak: stats.streak };
-    const queue = [];
-
-    if (stats.level > prev.level) {
-      const eventId = `level:${activeKid}:${stats.level}`;
-      if (!hasSeenAchievement(eventId)) {
-        queue.push({ id: eventId, type: 'level', value: stats.level, childName });
-      }
-    }
-
-    const hitMilestone = STREAK_MILESTONES.find(m => stats.streak === m && prev.streak < m);
-    if (hitMilestone) {
-      const bonus = hitMilestone === 3 ? 5 : hitMilestone === 7 ? 10 : hitMilestone === 14 ? 20 : 0;
-      const eventId = `streak:${activeKid}:${hitMilestone}`;
-      if (!hasSeenAchievement(eventId)) {
-        queue.push({ id: eventId, type: 'streak', value: hitMilestone, childName, bonus });
-      }
-    }
-
-    prevKidStatsRef.current[activeKid] = { level: stats.level, streak: stats.streak };
-    if (queue.length && !achievementOverlay) setAchievementOverlay(queue[0]);
-  }, [loading, screen, activeKid, data, levelThresholds, achievementOverlay]);
 
   if (loading) return (
     <>
@@ -2458,7 +2026,7 @@ export default function App() {
               <button className="back-btn" onClick={goHome}>← Terug</button>
             </header>
             <main className="main">
-              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} levelThresholds={levelThresholds} />
+              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} />
             </main>
           </>
         )}
@@ -2476,16 +2044,6 @@ export default function App() {
           <FeestOverlay
             childName={activeKidName}
             onClose={() => setShowFeest(false)}
-          />
-        )}
-
-        {achievementOverlay && (
-          <AchievementOverlay
-            event={achievementOverlay}
-            onClose={() => {
-              if (achievementOverlay?.id) markAchievementSeen(achievementOverlay.id);
-              setAchievementOverlay(null);
-            }}
           />
         )}
 
@@ -2859,19 +2417,15 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 }
 
 // ─── CHILD VIEW ────────────────────────────────────────────────────────────────
-function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, levelThresholds }) {
+function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
-  const allTodayTasks = data.tasks.filter(t =>
+  const todayTasks = data.tasks.filter(t =>
     t.childId === activeKid &&
     t.date === todayNow &&
     getTaskRemainingCoins(t, todayNow) > 0 &&
     shouldKeepCompletedVisible(t, todayNow)
   );
-  const todayTasks = allTodayTasks.filter((t) => {
-    const meta = parseTaskDesc(t.desc, t.coins);
-    return isDayPartVisibleNow(meta.dayPart);
-  });
   const missedTasks = data.tasks
     .filter(t =>
       t.childId === activeKid &&
@@ -2882,16 +2436,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     .sort((a, b) => a.date.localeCompare(b.date));
   const doneCount = todayTasks.filter(t => t.status !== "pending").length;
   const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
-  const allDone = allTodayTasks.length > 0 && allTodayTasks.every(t => t.status !== "pending");
-  const stats = buildChildStats(data, activeKid, todayNow, levelThresholds);
-  const myGoals = data.rewards.filter(r => isGoalReward(r) && rewardVisibleForChild(r, activeKid));
-  const groupTasksByDayPart = (tasks) => DAY_PART_ORDER.map((key) => ({
-    key,
-    ...getDayPartInfo(key),
-    tasks: tasks.filter((t) => parseTaskDesc(t.desc, t.coins).dayPart === key),
-  })).filter((group) => group.tasks.length > 0);
-  const todayTaskGroups = groupTasksByDayPart(todayTasks);
-  const missedTaskGroups = groupTasksByDayPart(missedTasks);
+  const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
 
   const [feitje]  = useState(() => FEITJES[Math.floor(Math.random() * FEITJES.length)]);
   const [coinPop, setCoinPop] = useState(false);
@@ -2985,24 +2530,6 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
         </div>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10, marginBottom:16 }}>
-        <div className="card" style={{ padding:"12px 14px" }}>
-          <div style={{ fontSize:11, color:th.pri, fontWeight:800, textTransform:"uppercase" }}>🔥 Streak</div>
-          <div style={{ fontSize:26, fontWeight:900 }}>{stats.streak} dag{stats.streak === 1 ? "" : "en"}</div>
-          <div style={{ fontSize:12, color:"var(--t2)" }}>Op rij met goedgekeurde taken</div>
-        </div>
-        <div className="card" style={{ padding:"12px 14px" }}>
-          <div style={{ fontSize:11, color:th.pri, fontWeight:800, textTransform:"uppercase" }}>⭐ Level</div>
-          <div style={{ fontSize:26, fontWeight:900 }}>Level {stats.level}</div>
-          <div className="pb" style={{ marginTop:6 }}><div className="pf" style={{ width:`${stats.levelProgress}%`, background: th.pri }} /></div>
-        </div>
-        <div className="card" style={{ padding:"12px 14px" }}>
-          <div style={{ fontSize:11, color:th.pri, fontWeight:800, textTransform:"uppercase" }}>🏅 Badges</div>
-          <div style={{ fontSize:26, fontWeight:900 }}>{stats.badges.length}</div>
-          <div style={{ fontSize:12, color:"var(--t2)" }}>Vrijgespeeld tot nu toe</div>
-        </div>
-      </div>
-
       {/* Tabs */}
       <div className="tabs" style={{ background: "rgba(255,255,255,.6)" }}>
         <button className={`tab ${kidTab === "tasks"   ? "on" : ""}`}
@@ -3024,16 +2551,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           <div className="st" style={{ marginBottom: 14, color: th.priD }}>Taken van vandaag {th.taskIcon}</div>
           {todayTasks.length === 0
             ? <div className="emp"><div className="ei">🎉</div><div className="et">Geen taken vandaag — vrij!</div></div>
-            : todayTaskGroups.map(group => (
-                <div key={group.key} style={{ marginBottom: 16 }}>
-                  <div className="card" style={{ padding: "10px 12px", marginBottom: 10, background: th.soft, borderColor: th.pri + "33" }}>
-                    <div style={{ fontWeight: 900, color: th.priD, fontSize: 15 }}>{group.emoji} {group.label}</div>
-                    <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 2 }}>Hier horen jouw {group.label.toLowerCase()}-taken bij.</div>
-                  </div>
-                  {group.tasks.map(t => (
-                    <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
-                  ))}
-                </div>
+            : todayTasks.map(t => (
+                <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
               ))
           }
         </div>
@@ -3047,16 +2566,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           </div>
           {missedTasks.length === 0
             ? <div className="emp"><div className="ei">😌</div><div className="et">Geen gemiste taken — netjes!</div></div>
-            : missedTaskGroups.map(group => (
-                <div key={group.key} style={{ marginBottom: 16 }}>
-                  <div className="card" style={{ padding: "10px 12px", marginBottom: 10, background: th.soft, borderColor: th.pri + "33" }}>
-                    <div style={{ fontWeight: 900, color: th.priD, fontSize: 15 }}>{group.emoji} {group.label}</div>
-                    <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 2 }}>Gemiste {group.label.toLowerCase()}-taken die nog niet verlopen zijn.</div>
-                  </div>
-                  {group.tasks.map(t => (
-                    <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} isMissed />
-                  ))}
-                </div>
+            : missedTasks.map(t => (
+                <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} isMissed />
               ))
           }
         </div>
@@ -3077,7 +2588,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                   {reserved > 0 && <span style={{ color:"#f59e0b", fontWeight:700 }}> · {reserved} gereserveerd · <strong style={{ color: th.pri }}>{available} beschikbaar</strong></span>}
                 </div>
                 <div className="ga">
-                  {data.rewards.filter(r => !isGoalReward(r) && rewardVisibleForChild(r, cur.id)).map(r => {
+                  {data.rewards.filter(r => rewardVisibleForChild(r, cur.id)).map(r => {
                     const rewardMeta = parseRewardDesc(r.desc);
                     const can = available >= r.cost;
                     return (
@@ -3096,27 +2607,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                       </div>
                     );
                   })}
-                  {data.rewards.filter(r => !isGoalReward(r) && rewardVisibleForChild(r, cur.id)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">{th.rewardIcon}</div><div className="et">Nog geen beloningen voor jou</div></div>}
-                </div>
-
-                <div style={{ marginTop: 18 }}>
-                  <div className="st" style={{ marginBottom: 10, color: th.priD }}>Spaardoelen 🎯</div>
-                  <div className="ga">
-                    {myGoals.map(g => {
-                      const info = parseRewardDesc(g.desc);
-                      const progress = Math.min(100, Math.round(((cur.coins || 0) / Math.max(1, info.goalTarget)) * 100));
-                      return (
-                        <div key={g.id} className="rc" style={{ border: `3px solid ${th.pri}33`, background: "#fff" }}>
-                          <div style={{ fontSize: 42, marginBottom: 8 }}>{g.emoji}</div>
-                          <div style={{ fontWeight: 800, fontSize: 15 }}>{g.title}</div>
-                          <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 10 }}>{info.visibleDesc}</div>
-                          <div className="pb" style={{ marginBottom: 8 }}><div className="pf" style={{ width: `${progress}%`, background: th.pri }} /></div>
-                          <div style={{ fontSize: 12, fontWeight: 800, color: th.pri }}>{cur.coins} / {info.goalTarget} coins</div>
-                        </div>
-                      );
-                    })}
-                    {myGoals.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎯</div><div className="et">Nog geen spaardoelen voor jou</div></div>}
-                  </div>
+                  {data.rewards.filter(r => rewardVisibleForChild(r, cur.id)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">{th.rewardIcon}</div><div className="et">Nog geen beloningen voor jou</div></div>}
                 </div>
               </>
             );
@@ -3130,14 +2621,10 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           .sort((a, b) => b.date.localeCompare(a.date));
         return (
           <div>
-            <div className="st" style={{ marginBottom: 14, color: th.priD }}>Mijn geschiedenis 📜</div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:10, marginBottom:14 }}>
-              {stats.badges.map(b => <div key={b.id} className="card" style={{ padding:"10px 12px", textAlign:"left" }}><div style={{ fontSize:28 }}>{b.icon}</div><div style={{ fontWeight:800, fontSize:14 }}>{b.title}</div><div style={{ fontSize:12, color:"var(--t2)" }}>{b.desc}</div></div>)}
-            </div>
+            <div className="st" style={{ marginBottom: 14, color: th.priD }}>Mijn Aankopen 🛍️</div>
             {myRedemptions.length === 0 ? (
               <div className="emp"><div className="ei">🛍️</div><div className="et">Je hebt nog niets aangevraagd</div></div>
             ) : myRedemptions.map(r => (
-
               <div key={r.id} style={{
                 display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
                 borderRadius:14, marginBottom:8, background:"#fff",
@@ -3146,10 +2633,10 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
               }}>
                 <div style={{ fontSize:34 }}>{r.rewardEmoji}</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontWeight:800, fontSize:15 }}>{isPenaltyRedemption(r) ? "Ecoins afgepakt" : isBonusRedemption(r) ? "Bonus verdiend" : r.rewardTitle}</div>
-                  <div style={{ fontSize:12, color:"var(--t2)", marginTop:2 }}>📅 {r.date} · {isPenaltyRedemption(r) ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`} coins</div>{isPenaltyRedemption(r) && <div style={{ fontSize:12, color:"#9a3412", fontWeight:700, marginTop:4 }}>Reden: {getPenaltyReason(r)}</div>}{isBonusRedemption(r) && <div style={{ fontSize:12, color:"#065f46", fontWeight:700, marginTop:4 }}>{getBonusLabel(r)}</div>}
+                  <div style={{ fontWeight:800, fontSize:15 }}>{r.rewardTitle}</div>
+                  <div style={{ fontSize:12, color:"var(--t2)", marginTop:2 }}>📅 {r.date} · 🪙 {r.cost} coins</div>
                 </div>
-                {isBonusRedemption(r) && <span style={{ background:"#dcfce7", color:"#166534", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>🎉 Bonus!</span>}{r.status === "approved" && !isBonusRedemption(r) && <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>✅ Goedgekeurd!</span>}
+                {r.status === "approved" && <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>✅ Goedgekeurd!</span>}
                 {r.status === "rejected" && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>❌ Afgewezen</span>}
                 {r.status === "pending"  && <span style={{ background:th.pri+"18", color:th.pri, borderRadius:50, padding:"4px 12px", fontSize:12, fontWeight:800, whiteSpace:"nowrap" }}>⏳ In behandeling</span>}
               </div>
@@ -3171,7 +2658,6 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const isNevah = childName === "Nevah";
   const taskMeta = parseTaskDesc(task.desc, task.coins);
   const daysLeft = getTaskDaysLeft(task, today);
-  const dayPartInfo = getDayPartInfo(taskMeta.dayPart);
 
   const handleCheck = () => {
     if (done || appr) return;
@@ -3210,10 +2696,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340" }}>{task.title}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-          <span className="bd" style={{ background: th.soft, color: th.priD }}>{dayPartInfo.emoji} {dayPartInfo.label}</span>
-          {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
-        </div>
+        {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
         {!done && !appr && (
           <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
             📅 Startdatum {task.date} · ⏳ Nog {daysLeft} dag{daysLeft === 1 ? "" : "en"} over
@@ -3234,7 +2717,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
 }
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
-function ParentView({ data, db, tab, setTab, setModal, parentPin, levelThresholds }) {
+function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
@@ -3263,24 +2746,22 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin, levelThreshold
       </div>
       <div className="tabs">
         {[
-          ["dashboard", "📊 Dashboard"],
           ["tasks",   "📋 Taken"],
           ["approve", `✅ Goedkeuren${pending.length ? ` (${pending.length})` : ""}`],
           ["kids",    "👶 Kinderen"],
-          ["rewards", "🎁 Beloningen & doelen"],
+          ["rewards", "🎁 Beloningen"],
           ["purchases", `🛍️ Aankopen${pendingRedemptions.length ? ` (${pendingRedemptions.length})` : ""}`],
           ["settings",  "⚙️ Instellingen"],
         ].map(([k,l]) => (
           <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
-      {tab === "dashboard" && <DashboardTab data={data} getChild={getChild} levelThresholds={levelThresholds} />}
       {tab === "tasks"     && <TasksTab     data={data} db={db} setModal={setModal} getChild={getChild} />}
       {tab === "approve"   && <ApproveTab   data={data} db={db} pending={pending}   getChild={getChild} />}
       {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
       {tab === "rewards"   && <RewardsTab   data={data} db={db} setModal={setModal} />}
       {tab === "purchases" && <PurchasesTab data={data} db={db} getChild={getChild} />}
-      {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} levelThresholds={levelThresholds} />}
+      {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} />}
     </div>
   );
 }
@@ -3292,69 +2773,6 @@ function TasksTab({ data, db, setModal, getChild }) {
   const recurringTemplates = [...data.tasks]
     .filter(t => isRecurringTemplateTask(t) && (filter === "all" || t.childId === filter))
     .sort((a, b) => a.date.localeCompare(b.date));
-  const plannedFutureTasks = [...data.tasks]
-    .filter(t => !isRecurringTemplateTask(t))
-    .filter(t => (filter === "all" || t.childId === filter) && t.date > todayNow);
-  const generatedRecurringTasks = (() => {
-    const inScope = [...data.tasks].filter(t => !isRecurringTemplateTask(t) && (filter === "all" || t.childId === filter));
-    const explicit = inScope.filter(t => !!parseTaskDesc(t.desc, t.coins).recurrenceSourceId);
-
-    const grouped = new Map();
-    for (const t of inScope) {
-      const info = parseTaskDesc(t.desc, t.coins);
-      const key = [t.childId, t.date, t.title, info.visibleDesc || "", info.dayPart || "allday", Number(info.maxCoins || t.coins || 0), t.status].join("||");
-      const arr = grouped.get(key) || [];
-      arr.push(t);
-      grouped.set(key, arr);
-    }
-
-    const likelyRecurringClones = [];
-    for (const arr of grouped.values()) {
-      if (arr.length > 1) likelyRecurringClones.push(...arr);
-    }
-
-    const unique = new Map();
-    [...explicit, ...likelyRecurringClones].forEach(t => unique.set(t.id, t));
-    return [...unique.values()];
-  })();
-  const plannedScopeLabel = filter === "all" ? "alle kinderen" : (getChild(filter)?.name || "dit kind");
-  const bulkDeleteTaskIds = async (ids) => {
-    const uniqueIds = [...new Set((ids || []).filter(Boolean))];
-    if (uniqueIds.length === 0) return;
-    const { error } = await supabase.from('tasks').delete().in('id', uniqueIds);
-    if (error) throw error;
-    reload();
-  };
-
-  const handleDeletePlannedTasks = async () => {
-    if (plannedFutureTasks.length === 0) {
-      window.alert("Er zijn geen geplande toekomstige taken om te verwijderen.");
-      return;
-    }
-    const ok = window.confirm(`Weet je zeker dat je ${plannedFutureTasks.length} geplande toekomstige taak/taken wilt verwijderen voor ${plannedScopeLabel}? Deze actie kun je niet ongedaan maken.`);
-    if (!ok) return;
-    try {
-      await bulkDeleteTaskIds(plannedFutureTasks.map(t => t.id));
-    } catch (err) {
-      console.error("Geplande taken verwijderen mislukt:", err);
-      window.alert("Het verwijderen van de geplande taken is niet volledig gelukt.");
-    }
-  };
-
-  const handleDeleteGeneratedRecurringTasks = async () => {
-    if (generatedRecurringTasks.length === 0) {
-      window.alert("Er zijn geen gegenereerde of foutief gekloonde terugkerende taken om te verwijderen.");
-      return;
-    }
-    const ok = window.confirm(`Weet je zeker dat je ${generatedRecurringTasks.length} gegenereerde of foutief gekloonde terugkerende taak/taken wilt verwijderen voor ${plannedScopeLabel}? Terugkerende sjablonen blijven bestaan, maar de losse gegenereerde taken verdwijnen. Deze actie kun je niet ongedaan maken.`);
-    if (!ok) return;
-    try {
-      await bulkDeleteTaskIds(generatedRecurringTasks.map(t => t.id));
-    } catch (err) {
-      console.error("Gegenereerde terugkerende taken verwijderen mislukt:", err);
-      window.alert("Het verwijderen van de gegenereerde terugkerende taken is niet volledig gelukt.");
-    }
-  };
   const tasks = [...data.tasks]
     .filter(t => !isRecurringTemplateTask(t))
     .filter(t => (
@@ -3375,11 +2793,7 @@ function TasksTab({ data, db, setModal, getChild }) {
     <div>
       <div className="sh">
         <span className="st">Alle Taken</span>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeleteGeneratedRecurringTasks}>🧹 Leeg terugkerende klonen{generatedRecurringTasks.length ? ` (${generatedRecurringTasks.length})` : ""}</button>
-          <button className="btn bh" style={{ color: "var(--red)" }} onClick={handleDeletePlannedTasks}>🗑 Verwijder geplande taken{plannedFutureTasks.length ? ` (${plannedFutureTasks.length})` : ""}</button>
-          <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
-        </div>
+        <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
       </div>
       <div className="frow">
         <button className={`btn bsm ${showHistory ? "bp" : "bh"}`} onClick={() => setShowHistory(v => !v)}>{showHistory ? "📚 Verberg geschiedenis" : "📚 Toon geschiedenis"}</button>
@@ -3406,7 +2820,6 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 start {t.date}</span>
-                  <span>{getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).emoji} {getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).label}</span>
                   <span>⏳ {parseTaskDesc(t.desc, t.coins).durationDays} dag(en)</span>
                   {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
                 </div>
@@ -3432,7 +2845,6 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
-                  <span>{getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).emoji} {getDayPartInfo(parseTaskDesc(t.desc, t.coins).dayPart).label}</span>
                   {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
                 </div>
               </div>
@@ -3442,46 +2854,6 @@ function TasksTab({ data, db, setModal, getChild }) {
           );
         })
       }
-    </div>
-  );
-}
-
-
-function DashboardTab({ data, getChild, levelThresholds }) {
-  const todayNow = getTodayISO();
-  const childStats = data.children.map(c => ({ child: c, stats: buildChildStats(data, c.id, todayNow, levelThresholds) }));
-  const top = [...childStats].sort((a, b) => (b.stats.weekEarnedCoins - b.stats.weekPenaltyCoins) - (a.stats.weekEarnedCoins - a.stats.weekPenaltyCoins))[0];
-  const pendingApprovals = data.tasks.filter(t => t.status === "done").length;
-  const pendingPurchases = data.redemptions.filter(r => r.status === "pending" && !isPenaltyRedemption(r)).length;
-  return (
-    <div>
-      <div className="sh"><span className="st">Weekdashboard 📊</span></div>
-      <div className="g3" style={{ marginBottom: 14 }}>
-        <div className="card"><div style={{ fontSize: 12, color:"var(--t2)", fontWeight:800 }}>⏳ Open goedkeuringen</div><div style={{ fontSize: 30, fontWeight: 900 }}>{pendingApprovals}</div></div>
-        <div className="card"><div style={{ fontSize: 12, color:"var(--t2)", fontWeight:800 }}>🛍️ Open aankopen</div><div style={{ fontSize: 30, fontWeight: 900 }}>{pendingPurchases}</div></div>
-        <div className="card"><div style={{ fontSize: 12, color:"var(--t2)", fontWeight:800 }}>🏆 Koploper van de week</div><div style={{ fontSize: 22, fontWeight: 900 }}>{top ? `${top.child.avatar} ${top.child.name}` : "-"}</div></div>
-      </div>
-      <div className="g2">
-        {childStats.map(({ child, stats }) => (
-          <div key={child.id} className="card">
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-              <div style={{ fontSize: 38 }}>{child.avatar}</div>
-              <div>
-                <div style={{ fontWeight:800, fontSize:18 }}>{child.name}</div>
-                <div style={{ fontSize:12, color:"var(--t2)" }}>Level {stats.level} · streak {stats.streak} dag{stats.streak === 1 ? "" : "en"}</div>
-              </div>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:8, marginBottom:10 }}>
-              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>✅ Deze week</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.weekApprovedCount}</div></div>
-              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>🪙 Verdiend</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.weekEarnedCoins}</div></div>
-              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>⚠️ Afgepakt</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.weekPenaltyCoins}</div></div>
-              <div className="card" style={{ padding:"10px 12px", background:"var(--sur2)" }}><div style={{ fontSize:11, color:"var(--t2)", fontWeight:800 }}>🏅 Badges</div><div style={{ fontSize:24, fontWeight:900 }}>{stats.badges.length}</div></div>
-            </div>
-            <div style={{ fontSize:12, color:"var(--t2)", marginBottom:6 }}>Levelvoortgang</div>
-            <div className="pb"><div className="pf" style={{ width:`${stats.levelProgress}%` }} /></div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -3588,54 +2960,9 @@ function KidsTab({ data, db, setModal }) {
   );
 }
 
-function SettingsTab({ data, db, parentPin, levelThresholds }) {
+function SettingsTab({ data, db, parentPin }) {
   const [pinDraft, setPinDraft] = useState(parentPin || DEFAULT_PARENT_PIN);
-  const [thresholdDraft, setThresholdDraft] = useState(normalizeLevelThresholds(levelThresholds));
-  const [thresholdDirty, setThresholdDirty] = useState(false);
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
-  useEffect(() => {
-    if (!thresholdDirty) {
-      setThresholdDraft(normalizeLevelThresholds(levelThresholds));
-    }
-  }, [levelThresholds, thresholdDirty]);
-
-  const updateThresholdAt = (idx, raw) => {
-    setThresholdDirty(true);
-    setThresholdDraft(prev => {
-      const next = [...prev];
-      next[idx] = raw === "" ? "" : Math.max(0, parseInt(raw, 10) || 0);
-      return next;
-    });
-  };
-
-  const addLevelRow = () => {
-    setThresholdDirty(true);
-    setThresholdDraft(prev => {
-      const normalized = normalizeLevelThresholds(prev);
-      const last = normalized[normalized.length - 1] || 0;
-      return [...normalized, last + 250];
-    });
-  };
-
-  const removeLevelRow = () => {
-    setThresholdDirty(true);
-    setThresholdDraft(prev => {
-      const normalized = normalizeLevelThresholds(prev);
-      return normalized.length <= 2 ? normalized : normalized.slice(0, -1);
-    });
-  };
-
-  const normalizedDraft = normalizeLevelThresholds(thresholdDraft);
-  const levelRows = normalizedDraft.map((start, idx) => {
-    const next = normalizedDraft[idx + 1];
-    return {
-      level: idx + 1,
-      start,
-      next,
-      span: next != null ? Math.max(1, next - start) : 250,
-    };
-  });
-
   return (
     <div>
       <div className="sh"><span className="st">Instellingen ⚙️</span></div>
@@ -3656,55 +2983,6 @@ function SettingsTab({ data, db, parentPin, levelThresholds }) {
           <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
         </div>
       </div>
-
-      <div className="card" style={{ marginTop: 14 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom: 10 }}>
-          <div>
-            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800 }}>📈 Levels instellen</div>
-            <div style={{ fontSize: 12, color: "var(--t2)" }}>Hier bepaal je vanaf hoeveel totaal ooit verdiende ecoins een kind een nieuw level bereikt.</div>
-          </div>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            <button className="btn bh bsm" onClick={removeLevelRow} disabled={normalizedDraft.length <= 2}>Laatste level weg</button>
-            <button className="btn bh bsm" onClick={addLevelRow}>+ Level toevoegen</button>
-          </div>
-        </div>
-
-        <div style={{ display:"grid", gap:10 }}>
-          {levelRows.map((row, idx) => (
-            <div key={idx} className="tr" style={{ alignItems:"center" }}>
-              <div style={{ minWidth: 110, fontWeight: 800 }}>Level {row.level}</div>
-              <div style={{ flex: 1, display:"grid", gridTemplateColumns:"minmax(120px,180px) 1fr", gap:10, alignItems:"center" }}>
-                <div className="fg" style={{ margin:0 }}>
-                  <label className="fl">Start vanaf</label>
-                  <input
-                    className="fi"
-                    type="number"
-                    min={idx === 0 ? 0 : Math.max(1, normalizedDraft[idx - 1] + 1)}
-                    value={thresholdDraft[idx]}
-                    onChange={e => updateThresholdAt(idx, e.target.value)}
-                    disabled={idx === 0}
-                  />
-                </div>
-                <div style={{ fontSize: 12, color: "var(--t2)" }}>
-                  {row.next != null
-                    ? `Level ${row.level} loopt van ${row.start} t/m ${row.next - 1} totaal verdiende ecoins. Volgend level na ${row.span} extra coin${row.span === 1 ? "" : "s"}.`
-                    : `Laatste level start bij ${row.start}. Zonder extra grens blijft de app steeds nieuwe niveaus tonen in stappen van ${row.span} coins.`}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop: 14 }}>
-          <button className="btn bp" onClick={async () => { await db.updateLevelThresholds(normalizedDraft); setThresholdDirty(false); }}>Levelvereisten opslaan</button>
-          <button className="btn bh" onClick={() => { setThresholdDirty(true); setThresholdDraft(DEFAULT_LEVEL_THRESHOLDS); }}>Standaard terugzetten</button>
-        </div>
-
-        <div style={{ marginTop: 12, fontSize: 12, color: "var(--t2)" }}>
-          De eerste regel hoort altijd op 0 te beginnen. De app bewaakt dat elk volgend level hoger ligt dan het vorige, zodat de ladder niet achteruit de kelder in valt.
-          {thresholdDirty ? <span style={{ display:"block", marginTop:6, color:"#b45309" }}>Niet-opgeslagen levelwijzigingen blijven nu staan terwijl de app op de achtergrond synchroniseert.</span> : null}
-        </div>
-      </div>
     </div>
   );
 }
@@ -3713,11 +2991,11 @@ function RewardsTab({ data, db, setModal }) {
   return (
     <div>
       <div className="sh">
-        <span className="st">Beloningen & spaardoelen 🎁🎯</span>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}><button className="btn bp" onClick={() => setModal({ type: "reward" })}>+ Beloning</button><button className="btn bh" onClick={() => setModal({ type: "goal" })}>+ Spaardoel</button></div>
+        <span className="st">Beloningen 🎁</span>
+        <button className="btn bp" onClick={() => setModal({ type: "reward" })}>+ Beloning</button>
       </div>
       <div className="ga">
-        {data.rewards.filter(r => !isGoalReward(r)).map(r => {
+        {data.rewards.map(r => {
           const rewardMeta = parseRewardDesc(r.desc);
           return (
           <div key={r.id} className="card" style={{ textAlign: "center" }}>
@@ -3729,41 +3007,7 @@ function RewardsTab({ data, db, setModal }) {
             <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delReward(r.id)}>Verwijder</button>
           </div>
         )})}
-        {data.rewards.filter(r => !isGoalReward(r)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎁</div><div className="et">Nog geen beloningen</div></div>}
-      </div>
-
-      <div className="sh" style={{ marginTop: 22 }}>
-        <span className="st">Spaardoelen 🎯</span>
-      </div>
-      <div className="ga">
-        {data.rewards.filter(r => isGoalReward(r)).map(r => {
-          const info = parseRewardDesc(r.desc);
-          const targets = info.targetChildIds.length ? data.children.filter(c => info.targetChildIds.includes(c.id)) : data.children;
-          return (
-            <div key={r.id} className="card" style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 44, marginBottom: 7 }}>{r.emoji}</div>
-              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 3 }}>{r.title}</div>
-              <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 6 }}>{info.visibleDesc}</div>
-              <div style={{ fontSize: 11, color: "var(--pri)", fontWeight: 800, marginBottom: 6 }}>🎯 {getRewardTargetLabel(r, data.children)}</div>
-              <div style={{ fontSize: 19, fontWeight: 900, color: "var(--yel)", marginBottom: 10 }}>Doel: 🪙 {info.goalTarget}</div>
-              <div style={{ display:"grid", gap:6, textAlign:"left", marginBottom:12 }}>
-                {targets.map(c => {
-                  const progress = Math.min(100, Math.round(((c.coins || 0) / Math.max(1, info.goalTarget)) * 100));
-                  return (
-                    <div key={c.id}>
-                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:4 }}>
-                        <span>{c.avatar} {c.name}</span><span>{c.coins} / {info.goalTarget}</span>
-                      </div>
-                      <div className="pb"><div className="pf" style={{ width: `${progress}%` }} /></div>
-                    </div>
-                  );
-                })}
-              </div>
-              <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delReward(r.id)}>Verwijder</button>
-            </div>
-          );
-        })}
-        {data.rewards.filter(r => isGoalReward(r)).length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎯</div><div className="et">Nog geen spaardoelen</div></div>}
+        {data.rewards.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">🎁</div><div className="et">Nog geen beloningen</div></div>}
       </div>
     </div>
   );
@@ -3776,12 +3020,11 @@ function PurchasesTab({ data, db, getChild }) {
     .filter(r => filter === "all" || r.childId === filter)
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const pendingList  = sorted.filter(r => r.status === "pending" && !isPenaltyRedemption(r) && !isBonusRedemption(r));
-  const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r) || isBonusRedemption(r));
+  const pendingList  = sorted.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
+  const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r));
 
   const statusLabel = (r) => {
     if (isPenaltyRedemption(r)) return <span style={{ background:"#fff7ed", color:"#9a3412", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
-    if (isBonusRedemption(r)) return <span style={{ background:"#dcfce7", color:"#166534", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>🎉 Bonus uitgekeerd</span>;
     if (r.status === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
     if (r.status === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
     return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
@@ -3799,10 +3042,10 @@ function PurchasesTab({ data, db, getChild }) {
             {ch && <span>{ch.avatar} {ch.name}</span>}
             <span>📅 {r.date}</span>
           </div>
-          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}{isBonusRedemption(r) && <div style={{ fontSize:12, color:"#166534", marginTop:5, fontWeight:700 }}>{getBonusLabel(r)}</div>}
+          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
           <div style={{ marginTop:5 }}>{statusLabel(r)}</div>
         </div>
-        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : isBonusRedemption(r) ? `➕ ${r.cost}` : `🪙 ${r.cost}`}</div>
+        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`}</div>
         {!penalty && r.status === "pending" && (
           <div style={{ display:"flex", gap:6 }}>
             <button className="btn bg bsm" onClick={() => db.approveRedemption(r.id)}>✅ Goedkeuren</button>
@@ -3815,7 +3058,7 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div className="sh"><span className="st">Aankopen, bonussen & straffen 🛍️🎉⚠️</span></div>
+      <div className="sh"><span className="st">Aankopen & straffen 🛍️⚠️</span></div>
 
       {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
@@ -3858,7 +3101,6 @@ function Modal({ modal, setModal, data, db }) {
   if (modal.type === "child")  return <AddChildModal  close={close} db={db} />;
   if (modal.type === "task")   return <AddTaskModal   close={close} db={db} children={data.children} />;
   if (modal.type === "reward") return <AddRewardModal close={close} db={db} children={data.children} />;
-  if (modal.type === "goal") return <AddGoalModal close={close} db={db} children={data.children} />;
   return null;
 }
 
@@ -3893,8 +3135,6 @@ function AddTaskModal({ close, db, children }) {
   const [date, setDate] = useState(today);
   const [durationDays, setDurationDays] = useState(3);
   const [recurrenceType, setRecurrenceType] = useState("none");
-  const [autoApproveRecurring, setAutoApproveRecurring] = useState(false);
-  const [dayPart, setDayPart] = useState("allDay");
   const BOTH_CHILDREN_VALUE = "__all_children__";
 
   const go = async () => {
@@ -3907,8 +3147,6 @@ function AddTaskModal({ close, db, children }) {
         durationDays: +durationDays,
         recurrenceType,
         isTemplate: recurrenceType !== "none",
-        autoApprove: recurrenceType !== "none" ? autoApproveRecurring : false,
-        dayPart,
       }),
       coins: +coins,
       date,
@@ -3960,36 +3198,11 @@ function AddTaskModal({ close, db, children }) {
                   <option value="weekly">Wekelijks terugkerend</option>
                 </select>
                 <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                  {recurrenceType === "none" ? "De taak wordt één keer aangemaakt op de gekozen startdag." : recurrenceType === "daily" ? "De tool plant vanaf de startdatum meteen 14 losse dagtaken vooruit." : "De tool plant vanaf de startdatum meteen 4 losse weektaken vooruit."}
+                  {recurrenceType === "none" ? "De taak wordt één keer aangemaakt op de gekozen startdag." : recurrenceType === "daily" ? "De tool maakt elke dag automatisch één nieuwe losse taak voor die dag." : "De tool maakt alleen op de volgende passende weekdag een nieuwe losse taak aan."}
                 </div>
               </div>
               <div className="fg"><label className="fl">Beschikbaar in dagen</label>
                 <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
-              </div>
-            </div>
-            {recurrenceType !== "none" && (
-              <div className="fg">
-                <label className="fl">Goedkeuring voor terugkerende taak</label>
-                <select className="fs" value={autoApproveRecurring ? "auto" : "manual"} onChange={e => setAutoApproveRecurring(e.target.value === "auto")}>
-                  <option value="manual">Handmatig door ouder</option>
-                  <option value="auto">Automatisch goedkeuren bij afvinken door kind</option>
-                </select>
-                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                  {autoApproveRecurring
-                    ? "Het kind krijgt de ecoins direct zodra het de taak afvinkt. De taak komt niet meer in de ouder-goedkeuringslijst."
-                    : "Het kind vinkt de taak af en daarna moet een ouder hem nog goedkeuren voordat de ecoins worden toegekend."}
-                </div>
-              </div>
-            )}
-            <div className="fg"><label className="fl">Dagdeel voor kinderen</label>
-              <select className="fs" value={dayPart} onChange={e => setDayPart(e.target.value)}>
-                <option value="allDay">🗓️ Hele dag</option>
-                <option value="morning">🌅 Ochtend</option>
-                <option value="afternoon">☀️ Middag</option>
-                <option value="evening">🌙 Avond</option>
-              </select>
-              <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                Kinderen zien hun taken straks overzichtelijk per dagdeel met passende emoji's.
               </div>
             </div>
             <div className="fg">
@@ -4010,68 +3223,14 @@ function AddTaskModal({ close, db, children }) {
               {recurrenceType === "none"
                 ? <>Start op <strong>{date}</strong> · zichtbaar vanaf de startdag · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
                 : recurrenceType === "daily"
-                  ? <>Dit wordt een <strong>dagelijks taaksjabloon</strong>. De planner maakt vanaf de startdatum meteen 14 losse dagtaken aan, maar kinderen zien per dag alleen de taak van die dag.</>
-                  : <>Dit wordt een <strong>wekelijks taaksjabloon</strong>. De planner maakt vanaf de startdatum meteen 4 losse weektaken aan, maar kinderen zien pas de taak van de juiste weekdag.</>}
+                  ? <>Dit wordt een <strong>dagelijks taaksjabloon</strong>. Kinderen zien telkens alleen de losse taak van de actuele dag, niet alle toekomstige dagen vooruit.</>
+                  : <>Dit wordt een <strong>wekelijks taaksjabloon</strong>. De losse taak verschijnt alleen op de passende weekdag vanaf <strong>{date}</strong>.</>}
             </div>
           </>
         )}
         <div className="ma">
           <button className="btn bh" onClick={close}>Annuleren</button>
           {children.length > 0 && <button className="btn bp" onClick={go} disabled={!title.trim()}>Aanmaken</button>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function AddGoalModal({ close, db, children }) {
-  const [title, setTitle] = useState("");
-  const [desc, setDesc] = useState("");
-  const [goalTarget, setGoalTarget] = useState(50);
-  const [emoji, setEmoji] = useState("🎯");
-  const ALL_CHILDREN_VALUE = "__goal_all_children__";
-  const [targetChildId, setTargetChildId] = useState(ALL_CHILDREN_VALUE);
-
-  const go = () => {
-    if (!title.trim()) return;
-    const targetChildIds = targetChildId === ALL_CHILDREN_VALUE ? [] : [targetChildId];
-    db.addReward({
-      title: title.trim(),
-      desc: encodeRewardDesc(desc, { targetChildIds, rewardType: "goal", goalTarget }),
-      cost: 1,
-      emoji,
-    });
-    close();
-  };
-
-  return (
-    <div className="ov" onClick={close}>
-      <div className="mo" onClick={e => e.stopPropagation()}>
-        <div className="mt">🎯 Spaardoel toevoegen</div>
-        <div className="fg"><label className="fl">Naam van het doel</label>
-          <input className="fi" value={title} onChange={e => setTitle(e.target.value)} placeholder="Bijv. LEGO set" autoFocus />
-        </div>
-        <div className="fg"><label className="fl">Omschrijving</label>
-          <textarea className="ft" value={desc} onChange={e => setDesc(e.target.value)} placeholder="Waar wordt voor gespaard?" />
-        </div>
-        <div className="fr">
-          <div className="fg"><label className="fl">Voor wie?</label>
-            <select className="fs" value={targetChildId} onChange={e => setTargetChildId(e.target.value)}>
-              {children.length > 1 && <option value={ALL_CHILDREN_VALUE}>Alle kinderen</option>}
-              {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
-            </select>
-          </div>
-          <div className="fg"><label className="fl">Doel in ecoins</label>
-            <input className="fi" type="number" min="1" max="500" value={goalTarget} onChange={e => setGoalTarget(Math.max(1, Math.min(500, Number(e.target.value) || 1)))} />
-          </div>
-        </div>
-        <div className="fg"><label className="fl">Emoji</label>
-          <input className="fi" value={emoji} onChange={e => setEmoji(e.target.value || "🎯")} placeholder="🎯" />
-        </div>
-        <div className="ma">
-          <button className="btn bh" onClick={close}>Annuleren</button>
-          <button className="btn bp" onClick={go} disabled={!title.trim()}>Doel aanmaken</button>
         </div>
       </div>
     </div>
@@ -4101,7 +3260,7 @@ function AddRewardModal({ close, db, children }) {
   const go = () => {
     if (title.trim()) {
       const targetChildIds = targetChildId === ALL_CHILDREN_VALUE ? [] : [targetChildId];
-      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds, rewardType: "reward" }), cost: Math.max(1, Number(cost) || 1), emoji });
+      db.addReward({ title: title.trim(), desc: encodeRewardDesc(desc, { targetChildIds }), cost: Math.max(1, Number(cost) || 1), emoji });
       close();
     }
   };
