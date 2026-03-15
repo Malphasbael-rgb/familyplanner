@@ -2767,33 +2767,6 @@ function TasksTab({ data, db, setModal, getChild }) {
         ))}
       </div>
 
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>🔁 Terugkerende taken</div>
-        <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 10 }}>Deze sjablonen maken automatisch losse taken op de juiste dag. Kinderen zien toekomstige herhalingen niet vooraf.</div>
-        {recurringTemplates.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--t2)" }}>Geen terugkerende taken actief.</div>
-        ) : recurringTemplates.map(t => {
-          const ch = getChild(t.childId);
-          return (
-            <div key={t.id} className="tr">
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</span>
-                  <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>🔁 {getRecurringLabel(t)}</span>
-                </div>
-                <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {ch && <span>{ch.avatar} {ch.name}</span>}
-                  <span>📅 start {t.date}</span>
-                  <span>⏳ {parseTaskDesc(t.desc, t.coins).durationDays} dag(en)</span>
-                  {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
-                </div>
-              </div>
-              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>🪙{parseTaskDesc(t.desc, t.coins).maxCoins}</span>
-              <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button>
-            </div>
-          );
-        })}
-      </div>
 
       {tasks.length === 0
         ? <div className="emp"><div className="ei">📋</div><div className="et">Geen losse taken — maak er een aan!</div></div>
@@ -2804,8 +2777,7 @@ function TasksTab({ data, db, setModal, getChild }) {
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</span>{statusEl(t.status)}
-                  {parseTaskDesc(t.desc, t.coins).recurrenceSourceId && <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>van terugkerend</span>}
-                </div>
+                                  </div>
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
