@@ -249,7 +249,7 @@ function getRewardTargetLabel(reward, children = []) {
   const names = info.targetChildIds
     .map(id => children.find(c => c.id === id))
     .filter(Boolean)
-    .map(c => `${c.avatar} ${c.name}`);
+    .map(c => `${getChildAvatar(c)} ${c.name}`);
   return names.length ? names.join(" · ") : "Specifieke kinderen";
 }
 
@@ -879,6 +879,9 @@ const DEFAULT_THEME = {
   progressColor:"rgba(255,255,255,.9)",
 };
 const getTheme = (name) => THEMES[name] || DEFAULT_THEME;
+const isNevahChild = (child) => child?.id === "c1" || /^(nevah|neoah|neva?h)$/i.test((child?.name || "").trim());
+const getChildTheme = (child) => isNevahChild(child) ? THEMES.Nevah : getTheme(child?.name || "");
+const getChildAvatar = (child) => isNevahChild(child) ? "👸" : (child?.avatar || "🧒");
 
 // ─── WEB AUDIO SOUNDS ──────────────────────────────────────────────────────────
 function useSound() {
@@ -2019,7 +2022,7 @@ export default function App() {
 
         {pinChild && (() => {
           const child = data.children.find(c => c.id === pinChild);
-          const th = getTheme(child?.name || "");
+          const th = getChildTheme(child);
           return (
             <PinScreen
               child={child}
@@ -2046,8 +2049,8 @@ export default function App() {
 function Thermometer({ children, onReveal, onReset, playDrumroll }) {
   if (children.length < 2) return null;
   const [a, b] = children;
-  const thA = getTheme(a.name);
-  const thB = getTheme(b.name);
+  const thA = getChildTheme(a);
+  const thB = getChildTheme(b);
 
   const [revealed,   setRevealed]   = useState(false);
   const [progress,   setProgress]   = useState(0);
@@ -2170,7 +2173,7 @@ function Thermometer({ children, onReveal, onReset, playDrumroll }) {
         <div style={{ flex:1, display:"flex", alignItems:"center", gap:10,
           background:thA.pri+"16", borderRadius:16, padding:"10px 14px",
           border:`2px solid ${thA.pri}35`, boxShadow:`0 4px 14px ${thA.pri}20` }}>
-          <div style={{ fontSize:28 }}>{a.avatar}</div>
+          <div style={{ fontSize:28 }}>{getChildAvatar(a)}</div>
           <div>
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:14, fontWeight:800, color:thA.pri }}>{a.name}</div>
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:22, fontWeight:900, color:thA.pri, lineHeight:1,
@@ -2184,7 +2187,7 @@ function Thermometer({ children, onReveal, onReset, playDrumroll }) {
           background:thB.pri+"16", borderRadius:16, padding:"10px 14px",
           border:`2px solid ${thB.pri}35`, boxShadow:`0 4px 14px ${thB.pri}20`,
           flexDirection:"row-reverse" }}>
-          <div style={{ fontSize:28 }}>{b.avatar}</div>
+          <div style={{ fontSize:28 }}>{getChildAvatar(b)}</div>
           <div style={{ textAlign:"right" }}>
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:14, fontWeight:800, color:thB.pri }}>{b.name}</div>
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:22, fontWeight:900, color:thB.pri, lineHeight:1,
@@ -2353,7 +2356,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
               onClick={() => onSelectKid(c.id)}>
               {/* Gekleurde top */}
               <div className="home-kid-top" style={{ background: th.hdr }}>
-                <div className="home-kid-av">{c.avatar}</div>
+                <div className="home-kid-av">{getChildAvatar(c)}</div>
                 <div className="home-kid-name">{c.name}</div>
                 <div className="home-kid-deco">{th.headerDeco.slice(0,4).join("")}</div>
               </div>
@@ -2444,7 +2447,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   }, [activeKid]);
 
   if (!cur) return null;
-  const th = getTheme(cur.name);
+  const th = getChildTheme(cur);
 
   return (
     <div style={{ background: th.bg, minHeight: "100vh", margin: "-24px -20px", padding: "24px 20px" }}>
@@ -2459,7 +2462,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
       {/* Kid header */}
       <div className="kh" style={{ background: th.hdr, boxShadow: th.hdrShadow }}>
         <div className="kh-left">
-          <div style={{ fontSize: 64, lineHeight: 1, filter: "drop-shadow(0 4px 10px rgba(0,0,0,.2))" }}>{cur.avatar}</div>
+          <div style={{ fontSize: 64, lineHeight: 1, filter: "drop-shadow(0 4px 10px rgba(0,0,0,.2))" }}>{getChildAvatar(cur)}</div>
           <div>
             <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginBottom: 8, color: "#fff" }}>
               {th.greeting}, {cur.name}! 👋
@@ -2763,7 +2766,7 @@ function TasksTab({ data, db, setModal, getChild }) {
         <button className={`btn bsm ${showHistory ? "bp" : "bh"}`} onClick={() => setShowHistory(v => !v)}>{showHistory ? "📚 Verberg geschiedenis" : "📚 Toon geschiedenis"}</button>
         <button className={`btn bsm ${filter === "all" ? "bp" : "bh"}`} onClick={() => setFilter("all")}>Alle kinderen</button>
         {data.children.map(c => (
-          <button key={c.id} className={`btn bsm ${filter === c.id ? "bp" : "bh"}`} onClick={() => setFilter(c.id)}>{c.avatar} {c.name}</button>
+          <button key={c.id} className={`btn bsm ${filter === c.id ? "bp" : "bh"}`} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
         ))}
       </div>
 
@@ -2839,7 +2842,7 @@ function KidsTab({ data, db, setModal }) {
       <div className="g3">
         {data.children.map(c => (
           <div key={c.id} className="card" style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 52, marginBottom: 6 }}>{c.avatar}</div>
+            <div style={{ fontSize: 52, marginBottom: 6 }}>{getChildAvatar(c)}</div>
             <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 19, fontWeight: 800 }}>{c.name}</div>
             <div style={{ fontSize: 21, fontWeight: 900, color: "var(--yel)", margin: "7px 0" }}>🪙 {c.coins}</div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>
@@ -3000,7 +3003,7 @@ function PurchasesTab({ data, db, getChild }) {
       <div className="frow" style={{ marginBottom:16 }}>
         <button className={`btn bsm ${filter==="all"?"bp":"bh"}`} onClick={() => setFilter("all")}>Alle kinderen</button>
         {data.children.map(c => (
-          <button key={c.id} className={`btn bsm ${filter===c.id?"bp":"bh"}`} onClick={() => setFilter(c.id)}>{c.avatar} {c.name}</button>
+          <button key={c.id} className={`btn bsm ${filter===c.id?"bp":"bh"}`} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
         ))}
       </div>
 
@@ -3113,7 +3116,7 @@ function AddTaskModal({ close, db, children }) {
               <div className="fg"><label className="fl">Kind</label>
                 <select className="fs" value={childId} onChange={e => setChildId(e.target.value)}>
                   {children.length > 1 && <option value={BOTH_CHILDREN_VALUE}>👦👧 Beide kinderen</option>}
-                  {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
+                  {children.map(c => <option key={c.id} value={c.id}>{getChildAvatar(c)} {c.name}</option>)}
                 </select>
                 <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
                   {childId === BOTH_CHILDREN_VALUE ? "Er worden twee losse taken aangemaakt, één per kind." : "Deze taak wordt aan één kind toegewezen."}
@@ -3258,7 +3261,7 @@ function AddRewardModal({ close, db, children }) {
           <label className="fl">Voor welk kind is deze beloning?</label>
           <select className="fs" value={targetChildId} onChange={e => setTargetChildId(e.target.value)}>
             <option value={ALL_CHILDREN_VALUE}>👦👧 Alle kinderen</option>
-            {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
+            {children.map(c => <option key={c.id} value={c.id}>{getChildAvatar(c)} {c.name}</option>)}
           </select>
           <div style={{ fontSize:12, color:"var(--t2)", marginTop:6 }}>
             {targetChildId === ALL_CHILDREN_VALUE ? "Deze beloning is zichtbaar voor alle kinderen." : "Deze beloning is alleen zichtbaar voor het gekozen kind."}
