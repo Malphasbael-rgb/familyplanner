@@ -1509,7 +1509,7 @@ function PinScreen({ child, theme: th, onSuccess, onCancel }) {
       <div className="pin-card"
         style={{ "--pin-pri": th.pri, "--pin-l": th.priL }}
         onClick={e => e.stopPropagation()}>
-        <span className="pin-avatar">{child?.avatar}</span>
+        <span className="pin-avatar">{getChildAvatar(child)}</span>
         <div className="pin-title" style={{ color: th.pri }}>Hoi {child?.name}!</div>
         <div className="pin-sub">Voer jouw pincode in 🔐</div>
 
@@ -2347,7 +2347,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
       {/* Kindkaarten */}
       <div className="home-kids">
         {data.children.map(c => {
-          const th = getTheme(c.name);
+          const th = getChildTheme(c);
           const todayDone = data.tasks.filter(t => t.childId === c.id && t.date === today && t.status !== "pending").length;
           const todayTotal = data.tasks.filter(t => t.childId === c.id && t.date === today).length;
           return (
@@ -2626,7 +2626,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const [shake,    setShake]   = useState(false);
   const [showSlay, setShowSlay]= useState(false);
   const th = theme || DEFAULT_THEME;
-  const isNevah = childName === "Nevah";
+  const isNevah = /^(névah|nevah|neoah|neva?h)$/i.test((childName || "").trim());
   const taskMeta = parseTaskDesc(task.desc, task.coins);
   const daysLeft = getTaskDaysLeft(task, today);
 
