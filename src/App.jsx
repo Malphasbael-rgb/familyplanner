@@ -821,7 +821,7 @@ const FEITJES = [
 
 const INIT = {
   children: [
-    { id: "c1", name: "Nevah",  avatar: "👧", coins: 35, pin: "1234" },
+    { id: "c1", name: "Nevah",  avatar: "👸", coins: 35, pin: "1234" },
     { id: "c2", name: "Kylian", avatar: "👦", coins: 20, pin: "0000" },
   ],
   tasks: [
@@ -842,17 +842,17 @@ const INIT = {
 // ─── KINDTHEMA'S ──────────────────────────────────────────────────────────────
 const THEMES = {
   Nevah: {
-    bg:             "linear-gradient(160deg,#fff0f9 0%,#fce7ff 50%,#ffe4f3 100%)",
-    hdr:            "linear-gradient(135deg,#e879a8 0%,#c026a0 100%)",
-    hdrShadow:      "0 8px 32px rgba(220,40,150,.30)",
-    pri:            "#d946a8", priD:"#a8157c", priL:"#fce7ff",
-    tabOnColor:     "#d946a8",
-    taskDoneBg:     "#fdf2f8", taskDoneBorder:"#e879a8",
-    deco:           ["🦋","✨","🌸","💖","⭐","🌈","🦄","💅","🎀","🌺"],
-    headerDeco:     ["🦋","🌸","💫","✨","🌸","🦋"],
-    taskIcon:       "✨", rewardIcon:"🎀",
-    greeting:       "Hey superster",
-    progressColor:  "rgba(255,220,240,.9)",
+    bg:             "linear-gradient(160deg,#fff1f7 0%,#ffe4f1 52%,#ffd6ea 100%)",
+    hdr:            "linear-gradient(135deg,#ff6fae 0%,#ff3d8f 100%)",
+    hdrShadow:      "0 8px 32px rgba(255,61,143,.32)",
+    pri:            "#ff4f9a", priD:"#e11d74", priL:"#ffe4f1",
+    tabOnColor:     "#ff4f9a",
+    taskDoneBg:     "#fff1f7", taskDoneBorder:"#ff6fae",
+    deco:           ["🎀","🌸","💖","👑","🦄","✨","💅","🌺","🍭","🩷"],
+    headerDeco:     ["🎀","🌸","💖","✨","👑","🦄"],
+    taskIcon:       "💖", rewardIcon:"🎀",
+    greeting:       "Hey prinses",
+    progressColor:  "rgba(255,214,234,.95)",
   },
   Kylian: {
     bg:             "linear-gradient(160deg,#e8f4ff 0%,#dbeafe 50%,#e0f2fe 100%)",
