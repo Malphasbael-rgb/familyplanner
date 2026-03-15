@@ -1694,50 +1694,9 @@ export default function App() {
     .catch(console.error), []);
 
   const processRecurringTemplates = useCallback(async () => {
-    if (loading || !data.tasks?.length) return;
-
-    const templates = data.tasks.filter(isRecurringTemplateTask);
-    if (!templates.length) return;
-
-    const referenceDate = getTodayISO();
-    let changed = false;
-
-    for (const template of templates) {
-      const occurrenceDate = getRecurringOccurrenceDate(template, referenceDate);
-      if (!occurrenceDate) continue;
-      const info = parseTaskDesc(template.desc, template.coins);
-      const alreadyExists = data.tasks.some((task) => {
-        if (task.id === template.id) return false;
-        const taskInfo = parseTaskDesc(task.desc, task.coins);
-        return !isRecurringTemplateTask(task)
-          && task.childId === template.childId
-          && task.date === occurrenceDate
-          && taskInfo.recurrenceSourceId === template.id;
-      });
-      if (alreadyExists) continue;
-
-      await dbAddTask({
-        id: genId(),
-        childId: template.childId,
-        title: template.title,
-        description: encodeTaskDesc(info.visibleDesc, {
-          maxCoins: info.maxCoins,
-          durationDays: info.durationDays,
-          recurrenceType: info.recurrenceType,
-          recurrenceSourceId: template.id,
-          isTemplate: false,
-          doneOn: null,
-          approvedOn: null,
-        }),
-        coins: info.maxCoins,
-        date: occurrenceDate,
-        status: 'pending',
-      });
-      changed = true;
-    }
-
-    if (changed) reload();
-  }, [data.tasks, loading, reload]);
+    // Terugkerende taken zijn verwijderd uit deze basisversie.
+    return;
+  }, []);
 
   // ── Verwerk gemiste taken: coins vervallen op basis van max coins ÷ duur ──
   const processMissedTasks = useCallback(async () => {
@@ -1785,8 +1744,17 @@ export default function App() {
 
   // ── Maak waar nodig losse taken aan uit terugkerende sjablonen ──
   useEffect(() => {
-    if (!loading) processRecurringTemplates().catch(err => console.error("Terugkerende taken verwerken mislukt:", err));
-  }, [loading, data.tasks, processRecurringTemplates]);
+    if (loading || !data.tasks?.length) return;
+    const recurringTasks = data.tasks.filter((task) => {
+      const info = parseTaskDesc(task.desc, task.coins);
+      return task.status === 'template' || info.isTemplate || info.recurrenceType !== 'none' || !!info.recurrenceSourceId;
+    });
+    if (!recurringTasks.length) return;
+
+    Promise.all(recurringTasks.map((task) => dbDelTask(task.id)))
+      .then(() => reload())
+      .catch(err => console.error('Oude terugkerende taken opruimen mislukt:', err));
+  }, [loading, data.tasks, reload]);
 
   // ── Realtime: luister naar wijzigingen in de database ──
   // Zodra een ander apparaat iets wijzigt, wordt de data hier automatisch bijgewerkt
@@ -2770,11 +2738,7 @@ function TasksTab({ data, db, setModal, getChild }) {
   const [filter, setFilter] = useState("all");
   const [showHistory, setShowHistory] = useState(false);
   const todayNow = getTodayISO();
-  const recurringTemplates = [...data.tasks]
-    .filter(t => isRecurringTemplateTask(t) && (filter === "all" || t.childId === filter))
-    .sort((a, b) => a.date.localeCompare(b.date));
   const tasks = [...data.tasks]
-    .filter(t => !isRecurringTemplateTask(t))
     .filter(t => (
       (filter === "all" || t.childId === filter) &&
       (
@@ -3134,7 +3098,6 @@ function AddTaskModal({ close, db, children }) {
   const [coins, setCoins] = useState(10);
   const [date, setDate] = useState(today);
   const [durationDays, setDurationDays] = useState(3);
-  const [recurrenceType, setRecurrenceType] = useState("none");
   const BOTH_CHILDREN_VALUE = "__all_children__";
 
   const go = async () => {
@@ -3145,13 +3108,11 @@ function AddTaskModal({ close, db, children }) {
       desc: encodeTaskDesc(desc, {
         maxCoins: +coins,
         durationDays: +durationDays,
-        recurrenceType,
-        isTemplate: recurrenceType !== "none",
       }),
       coins: +coins,
       date,
       childId: targetChildId,
-      status: recurrenceType === "none" ? "pending" : "template",
+      status: "pending",
     });
 
     if (childId === BOTH_CHILDREN_VALUE) {
@@ -3183,7 +3144,7 @@ function AddTaskModal({ close, db, children }) {
                   {children.map(c => <option key={c.id} value={c.id}>{c.avatar} {c.name}</option>)}
                 </select>
                 <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                  {childId === BOTH_CHILDREN_VALUE ? "Er worden twee losse taken of sjablonen aangemaakt, één per kind." : "Deze taak wordt aan één kind toegewezen."}
+                  {childId === BOTH_CHILDREN_VALUE ? "Er worden twee losse taken aangemaakt, één per kind." : "Deze taak wordt aan één kind toegewezen."}
                 </div>
               </div>
               <div className="fg"><label className="fl">Startdatum</label>
@@ -3191,16 +3152,6 @@ function AddTaskModal({ close, db, children }) {
               </div>
             </div>
             <div className="fr">
-              <div className="fg"><label className="fl">Herhaling</label>
-                <select className="fs" value={recurrenceType} onChange={e => setRecurrenceType(e.target.value)}>
-                  <option value="none">Eenmalig</option>
-                  <option value="daily">Dagelijks terugkerend</option>
-                  <option value="weekly">Wekelijks terugkerend</option>
-                </select>
-                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
-                  {recurrenceType === "none" ? "De taak wordt één keer aangemaakt op de gekozen startdag." : recurrenceType === "daily" ? "De tool maakt elke dag automatisch één nieuwe losse taak voor die dag." : "De tool maakt alleen op de volgende passende weekdag een nieuwe losse taak aan."}
-                </div>
-              </div>
               <div className="fg"><label className="fl">Beschikbaar in dagen</label>
                 <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
               </div>
@@ -3220,11 +3171,7 @@ function AddTaskModal({ close, db, children }) {
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}><span>1</span><span>50</span></div>
             </div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
-              {recurrenceType === "none"
-                ? <>Start op <strong>{date}</strong> · zichtbaar vanaf de startdag · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
-                : recurrenceType === "daily"
-                  ? <>Dit wordt een <strong>dagelijks taaksjabloon</strong>. Kinderen zien telkens alleen de losse taak van de actuele dag, niet alle toekomstige dagen vooruit.</>
-                  : <>Dit wordt een <strong>wekelijks taaksjabloon</strong>. De losse taak verschijnt alleen op de passende weekdag vanaf <strong>{date}</strong>.</>}
+              <>Start op <strong>{date}</strong> · zichtbaar vanaf de startdag · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
             </div>
           </>
         )}
