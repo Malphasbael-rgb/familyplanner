@@ -4355,30 +4355,78 @@ function PurchasesTab({ data, db, getChild }) {
   const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r));
 
   const statusLabel = (r) => {
-    if (isPenaltyRedemption(r)) return <span style={{ background:"#fff7ed", color:"#9a3412", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
-    if (r.status === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
-    if (r.status === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
-    return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
+    if (isPenaltyRedemption(r)) return <span style={{ background:"#fff7ed", color:"#9a3412", borderRadius:50, padding:"4px 10px", fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
+    if (r.status === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"4px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
+    if (r.status === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"4px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
+    return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:50, padding:"4px 10px", fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
+  };
+
+  const fmtDate = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "—";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : raw;
+  };
+
+  const getHandledDate = (r) => {
+    return fmtDate(r.approvedOn || r.approved_at || r.handledOn || r.handled_at || r.updated_at || r.updatedAt || (r.status !== "pending" ? r.date : ""));
+  };
+
+  const infoBoxStyle = {
+    background: "rgba(255,255,255,.05)",
+    border: "1px solid rgba(148,163,184,.16)",
+    borderRadius: 14,
+    padding: "10px 12px",
+    minHeight: 58,
   };
 
   const RedemptionRow = ({ r }) => {
     const ch = getChild(r.childId);
     const penalty = isPenaltyRedemption(r);
+    const requestedDate = fmtDate(r.date);
+    const handledDate = getHandledDate(r);
+    const amountText = penalty ? `➖ ${Math.abs(r.cost)} coins` : `🪙 ${r.cost} coins`;
+    const actionLabel = penalty ? "Straf uitgevoerd" : (r.rewardTitle || "Beloning");
     return (
-      <div className="tr" style={parentQuietUi.row({ background: penalty ? "rgba(154,52,18,.10)" : r.status === "approved" ? "rgba(34,197,94,.10)" : r.status === "rejected" ? "rgba(248,113,113,.10)" : PARENT_THEME.colors.rowBg, flexWrap:"wrap", gap:8 })}>
-        <div style={{ fontSize:32 }}>{r.rewardEmoji}</div>
-        <div style={{ flex:1, minWidth:120 }}>
-          <div style={{ fontWeight:800, fontSize:15 }}>{penalty ? "Ecoins afgepakt" : r.rewardTitle}</div>
-          <div style={parentQuietUi.softText({ fontSize:12, display:"flex", gap:8, marginTop:2, flexWrap:"wrap" })}>
-            {ch && <span>{ch.avatar} {ch.name}</span>}
-            <span>📅 {r.date}</span>
+      <div className="tr" style={parentQuietUi.card({ background: penalty ? "linear-gradient(180deg, rgba(154,52,18,.12), rgba(154,52,18,.08))" : r.status === "approved" ? "linear-gradient(180deg, rgba(34,197,94,.12), rgba(34,197,94,.08))" : r.status === "rejected" ? "linear-gradient(180deg, rgba(248,113,113,.12), rgba(248,113,113,.08))" : PARENT_THEME.colors.rowBg })}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:12, flexWrap:"wrap" }}>
+          <div style={{ width:56, height:56, borderRadius:16, display:"grid", placeItems:"center", fontSize:30, background:"rgba(255,255,255,.06)", border:"1px solid rgba(148,163,184,.16)" }}>{r.rewardEmoji}</div>
+          <div style={{ flex:1, minWidth:180 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+              <div style={{ fontWeight:900, fontSize:17, color:"#f8fbff" }}>{actionLabel}</div>
+              {statusLabel(r)}
+            </div>
+            <div style={parentQuietUi.softText({ fontSize:13, marginTop:4 })}>
+              {ch ? <span>{ch.avatar} {ch.name}</span> : <span>Kind onbekend</span>}
+            </div>
           </div>
-          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
-          <div style={{ marginTop:5 }}>{statusLabel(r)}</div>
+          <div style={{ fontWeight:900, color: penalty ? "#fdba74" : "var(--yel)", fontSize:18, whiteSpace:"nowrap" }}>{amountText}</div>
         </div>
-        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`}</div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px,1fr))", gap:10 }}>
+          <div style={infoBoxStyle}>
+            <div style={{ fontSize:11, fontWeight:800, color:"#b8c8df", textTransform:"uppercase", letterSpacing:.4 }}>Wat</div>
+            <div style={{ marginTop:6, fontWeight:800, color:"#f8fbff", fontSize:14 }}>{penalty ? "Ecoins afgepakt" : (r.rewardTitle || "Beloning")}</div>
+          </div>
+          <div style={infoBoxStyle}>
+            <div style={{ fontSize:11, fontWeight:800, color:"#b8c8df", textTransform:"uppercase", letterSpacing:.4 }}>Aangevraagd</div>
+            <div style={{ marginTop:6, fontWeight:800, color:"#f8fbff", fontSize:14 }}>📅 {requestedDate}</div>
+          </div>
+          <div style={infoBoxStyle}>
+            <div style={{ fontSize:11, fontWeight:800, color:"#b8c8df", textTransform:"uppercase", letterSpacing:.4 }}>{penalty ? "Uitgevoerd" : (r.status === "pending" ? "Nog niet goedgekeurd" : "Goedgekeurd")}</div>
+            <div style={{ marginTop:6, fontWeight:800, color:"#f8fbff", fontSize:14 }}>{r.status === "pending" ? "⏳ Nog open" : `✅ ${handledDate}`}</div>
+          </div>
+          <div style={infoBoxStyle}>
+            <div style={{ fontSize:11, fontWeight:800, color:"#b8c8df", textTransform:"uppercase", letterSpacing:.4 }}>Coins</div>
+            <div style={{ marginTop:6, fontWeight:900, color: penalty ? "#fdba74" : "var(--yel)", fontSize:16 }}>{amountText}</div>
+          </div>
+        </div>
+
+        {penalty && <div style={{ fontSize:12, color:"#fdba74", marginTop:10, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
+
         {!penalty && r.status === "pending" && (
-          <div style={{ display:"flex", gap:6 }}>
+          <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
             <button className="btn bg bsm" onClick={() => db.approveRedemption(r.id)}>✅ Goedkeuren</button>
             <button className="btn bsm" style={{ background:"var(--red-l)", color:"var(--red)", border:"none" }} onClick={() => db.rejectRedemption(r.id)}>❌ Afwijzen</button>
           </div>
