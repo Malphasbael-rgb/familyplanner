@@ -3622,8 +3622,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             {todayActivities.length > 0 ? (
               <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                 {todayActivities.map(item => (
-                  <div key={item.id} style={{ background:`${th.pri}14`, color:th.priD, border:`1px solid ${th.pri}2e`, borderRadius:999, padding:'8px 10px', fontSize:12, fontWeight:800, display:'flex', alignItems:'center', gap:6 }}>
-                    <span style={{ fontSize: 16 }}>{item.emoji || guessActivityEmoji(item.title)}</span>
+                  <div key={item.id} style={{ background:`${th.pri}14`, color:th.priD, border:`1px solid ${th.pri}2e`, borderRadius:999, padding:'10px 14px', fontSize:13, fontWeight:800, display:'flex', alignItems:'center', gap:10 }}>
+                    <span style={{ fontSize: 30, lineHeight: 1 }}>{item.emoji || guessActivityEmoji(item.title)}</span>
                     <span>{item.title}</span>
                     {item.time ? <span style={{ opacity:.75 }}>· {item.time}</span> : null}
                   </div>
