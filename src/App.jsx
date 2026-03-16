@@ -1398,6 +1398,17 @@ const CSS = `
   .fl{display:block;font-weight:700;font-size:12px;margin-bottom:5px;color:#374151}
   .fi,.fs,.ft{width:100%;padding:9px 13px;border-radius:var(--rs);border:2px solid var(--bor);font-family:'Nunito',sans-serif;font-size:13px;background:var(--sur2);color:#1e2340;outline:none;transition:border-color .2s}
   .fi:focus,.fs:focus,.ft:focus{border-color:var(--pri);background:#fff}
+  .dark-form .fl{color:rgba(226,232,240,.92);font-weight:800}
+  .dark-form .fi,.dark-form .fs,.dark-form .ft{background:rgba(255,255,255,.96);color:#0f172a;border-color:rgba(148,163,184,.28)}
+  .dark-form .fi::placeholder,.dark-form .fs::placeholder,.dark-form .ft::placeholder{color:#64748b}
+  .dark-form .fi:focus,.dark-form .fs:focus,.dark-form .ft:focus{background:#fff;border-color:#818cf8;box-shadow:0 0 0 4px rgba(129,140,248,.14)}
+  .parent-quiet .fl{color:rgba(241,245,249,.96)!important;font-weight:800;letter-spacing:.01em}
+  .parent-quiet .fi,.parent-quiet .fs,.parent-quiet .ft{background:rgba(255,255,255,.98)!important;color:#0f172a!important;border-color:rgba(148,163,184,.34)!important}
+  .parent-quiet .fi::placeholder,.parent-quiet .fs::placeholder,.parent-quiet .ft::placeholder{color:#64748b!important;opacity:1}
+  .parent-quiet .fi:focus,.parent-quiet .fs:focus,.parent-quiet .ft:focus{background:#fff!important;border-color:#818cf8!important;box-shadow:0 0 0 4px rgba(129,140,248,.18)!important}
+  .parent-quiet .tab{color:rgba(241,245,249,.88)!important}
+  .parent-quiet .tab.on{color:#f8fafc!important}
+  .parent-quiet button,.parent-quiet input,.parent-quiet select,.parent-quiet textarea{font-weight:700}
   .ft{resize:vertical;min-height:65px}
   .fr{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   @media(max-width:480px){.fr{grid-template-columns:1fr}}
@@ -3314,7 +3325,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
               <div style={{ height:12, borderRadius:999, background:'rgba(255,255,255,0.08)', overflow:'hidden' }}>
                 <div style={{ width:progressWidth, height:'100%', borderRadius:999, background:`linear-gradient(90deg, ${theme.accent}, ${theme.accent2})`, boxShadow:`0 0 14px ${theme.glow}` }} />
               </div>
-              <div style={{ marginTop:8, color:'rgba(226,232,240,0.76)', fontSize:13 }}>{level.isMax ? 'Max level bereikt' : `Nog ${level.remaining} lifetime coins tot level ${level.nextLevel}`}</div>
+              <div style={{ marginTop:8, color:'rgba(226,232,240,0.88)', fontSize:13 }}>{level.isMax ? 'Max level bereikt' : `Nog ${level.remaining} lifetime coins tot level ${level.nextLevel}`}</div>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
               {[
@@ -3323,7 +3334,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
                 { label:'goedk.', value:approvals, emoji:'✅', tone:'#86efac' },
               ].map(stat => (
                 <div key={stat.label} style={{ padding:'12px 10px', borderRadius:16, background:'rgba(15,23,42,0.44)', border:'1px solid rgba(148,163,184,0.14)' }}>
-                  <div style={{ fontSize:12, color:'rgba(226,232,240,0.72)', marginBottom:4 }}>{stat.emoji} {stat.label}</div>
+                  <div style={{ fontSize:12, color:'rgba(226,232,240,0.84)', marginBottom:4 }}>{stat.emoji} {stat.label}</div>
                   <div style={{ fontWeight:900, fontSize:26, color:stat.tone }}>{stat.value}</div>
                 </div>
               ))}
@@ -3346,7 +3357,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
                     <div style={{ fontWeight:800, color:'#fcd34d' }}>+{weeklyCoins} coins</div>
                   </div>
                   <div style={{ height:10, borderRadius:999, background:'rgba(255,255,255,0.07)', overflow:'hidden', marginBottom:8 }}><div style={{ width:`${Math.max(6, Math.round(progress*100))}%`, height:'100%', background:`linear-gradient(90deg, ${theme.accent}, ${theme.accent2})`, borderRadius:999 }} /></div>
-                  <div style={{ color:'rgba(226,232,240,0.74)', fontSize:13 }}>{doneCount} afgeronde taken deze week</div>
+                  <div style={{ color:'rgba(226,232,240,0.86)', fontSize:13 }}>{doneCount} afgeronde taken deze week</div>
                 </div>
               );
             })}
@@ -3369,7 +3380,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
             {attentionItems.slice(0,4).map(item => (
               <button key={item.key} onClick={item.onClick} style={{ textAlign:'left', padding:'14px 14px', borderRadius:18, border:`1px solid ${item.tone}33`, background:'rgba(15,23,42,0.46)', color:'#eef2ff', cursor:item.onClick?'pointer':'default' }}>
                 <div style={{ fontWeight:800 }}>{item.emoji} {item.title}</div>
-                {item.subtitle && <div style={{ fontSize:13, color:'rgba(226,232,240,0.72)', marginTop:4 }}>{item.subtitle}</div>}
+                {item.subtitle && <div style={{ fontSize:13, color:'rgba(226,232,240,0.84)', marginTop:4 }}>{item.subtitle}</div>}
               </button>
             ))}
           </div>
@@ -3380,7 +3391,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
         <div style={{ ...panel, padding:18 }}>
           <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>🧾 Recente activiteit</div>
           {recentActivities.length === 0 ? (
-            <div style={{ color:'rgba(226,232,240,0.72)', fontSize:14 }}>Nog geen recente activiteit zichtbaar.</div>
+            <div style={{ color:'rgba(226,232,240,0.84)', fontSize:14 }}>Nog geen recente activiteit zichtbaar.</div>
           ) : (
             <div style={{ display:'grid', gap:12 }}>
               {recentActivities.map(item => (
@@ -3426,7 +3437,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
   };
 
   return (
-    <div>
+    <div className={tab === "dashboard" ? "" : "parent-quiet"}>
       {tab === "dashboard" ? (
         <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} />
       ) : (
@@ -3434,12 +3445,12 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
             <div>
               <h1 style={{ fontFamily: "'Baloo 2',cursive", fontSize: 30, fontWeight: 800, marginBottom: 4, color:'#eef2ff' }}>Ouderportaal ✨</h1>
-              <p style={{ color: "rgba(226,232,240,0.72)", fontSize: 14 }}>Zelfde rustige dashboardstijl, maar met focus op overzicht en sneller beheren.</p>
+              <p style={{ color: "rgba(226,232,240,0.84)", fontSize: 14 }}>Zelfde rustige dashboardstijl, maar met focus op overzicht en sneller beheren.</p>
             </div>
             {(pending.length > 0 || pendingRedemptions.length > 0) && (
               <div style={{ display:"flex", flexDirection:"column", gap:8, minWidth:240 }}>
                 {pending.length > 0 && (
-                  <div style={{ background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.24)", borderRadius: 16, padding: "9px 14px", fontWeight: 700, fontSize: 13, color: "#fbbf24" }}>
+                  <div style={{ background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.24)", borderRadius: 16, padding: "9px 14px", fontWeight: 700, fontSize: 13, color: "#fcd34d" }}>
                     ⏳ {pending.length} taak{pending.length > 1 ? "en" : ""} wacht op goedkeuring
                   </div>
                 )}
@@ -3535,7 +3546,7 @@ function TasksTab({ data, db, setModal, getChild }) {
   };
 
   const FilterChip = ({ active, onClick, children }) => (
-    <button onClick={onClick} style={{ border:'none', borderRadius:999, padding:'10px 14px', fontWeight:800, cursor:'pointer', background: active ? 'linear-gradient(135deg, rgba(99,102,241,.26), rgba(59,130,246,.16))' : 'rgba(255,255,255,.05)', color: active ? '#eef2ff' : 'rgba(226,232,240,.74)', boxShadow: active ? 'inset 0 0 0 1px rgba(129,140,248,.22)' : 'inset 0 0 0 1px rgba(148,163,184,.12)' }}>{children}</button>
+    <button onClick={onClick} style={{ border:'none', borderRadius:999, padding:'10px 14px', fontWeight:800, cursor:'pointer', background: active ? 'linear-gradient(135deg, rgba(99,102,241,.26), rgba(59,130,246,.16))' : 'rgba(255,255,255,.05)', color: active ? '#eef2ff' : 'rgba(226,232,240,.86)', boxShadow: active ? 'inset 0 0 0 1px rgba(129,140,248,.22)' : 'inset 0 0 0 1px rgba(148,163,184,.12)' }}>{children}</button>
   );
 
   return (
@@ -3568,7 +3579,7 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 800, fontSize: 16 }}>{t.title}</span>{statusEl(t.status)}
                 </div>
-                <div style={{ fontSize: 13, color: 'rgba(226,232,240,.72)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 13, color: 'rgba(226,232,240,.84)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
                   <span>{getDayPartConfig(info.dayPart).emoji} {getDayPartLabel(info.dayPart)}</span>
@@ -3613,7 +3624,7 @@ function ApproveTab({ data, db, pending, getChild }) {
               <div style={{ width:52, height:52, borderRadius:'50%', display:'grid', placeItems:'center', background:'rgba(59,130,246,.12)', fontSize:28 }}>{ch?.avatar || "🧒"}</div>
               <div style={{ flex:1, minWidth:160 }}>
                 <div style={{ fontWeight:800, fontSize:17, marginBottom:4 }}>{t.title}</div>
-                <div style={{ fontSize:13, color:'rgba(226,232,240,.72)', display:'flex', gap:10, flexWrap:'wrap' }}>
+                <div style={{ fontSize:13, color:'rgba(226,232,240,.84)', display:'flex', gap:10, flexWrap:'wrap' }}>
                   <span>{ch?.name}</span><span>📅 {t.date}</span><span>{getDayPartConfig(info.dayPart).emoji} {getDayPartLabel(info.dayPart)}</span><span>🪙 {t.coins}</span>
                 </div>
               </div>
@@ -3645,11 +3656,11 @@ function KidsTab({ data, db, setModal }) {
       <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Kinderen 👶</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Beheer pins, coins, levels en correcties zonder rommelig gedoe.</div></div><button className="btn bp" style={{ borderRadius:16, boxShadow:'0 10px 24px rgba(99,102,241,.18)' }} onClick={() => setModal({ type: "child" })}>+ Toevoegen</button></div>
       <div className="g3">
         {data.children.map(c => (
-          <div key={c.id} className="card" style={{ textAlign: "center", background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))', border:'1px solid rgba(148,163,184,.14)', boxShadow:'0 18px 40px rgba(2,6,23,.14)', borderRadius:22, color:'#eef2ff' }}>
+          <div key={c.id} className="card dark-form" style={{ textAlign: "center", background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))', border:'1px solid rgba(148,163,184,.14)', boxShadow:'0 18px 40px rgba(2,6,23,.14)', borderRadius:22, color:'#eef2ff' }}>
             <div style={{ fontSize: 52, marginBottom: 6 }}>{getChildAvatar(c)}</div>
             <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 19, fontWeight: 800 }}>{c.name}</div>
             <div style={{ fontSize: 21, fontWeight: 900, color: "var(--yel)", margin: "7px 0" }}>🪙 {c.coins}</div>
-            <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'rgba(226,232,240,.86)', marginBottom: 12 }}>
               {data.tasks.filter(t => t.childId === c.id && t.status === "approved").length} taken voltooid
             </div>
 
@@ -3671,7 +3682,7 @@ function KidsTab({ data, db, setModal }) {
             </div>
 
             <div style={{ borderTop:"1px dashed var(--line)", margin:"10px 0 12px" }} />
-            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 16, fontWeight: 800, marginBottom: 8, color: "#9a3412" }}>⚠️ Straf / ecoins afpakken</div>
+            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 16, fontWeight: 800, marginBottom: 8, color: "#fdba74", textShadow:'0 1px 0 rgba(0,0,0,.15)' }}>⚠️ Straf / ecoins afpakken</div>
             <div className="fg" style={{ textAlign: "left", marginBottom: 10 }}>
               <label className="fl">Aantal ecoins om af te pakken</label>
               <input className="fi" inputMode="numeric" value={penaltyValue(c)} onChange={e => setPenaltyDrafts(s => ({ ...s, [c.id]: e.target.value.replace(/\D/g, "") }))} placeholder="1" />
@@ -3683,7 +3694,7 @@ function KidsTab({ data, db, setModal }) {
             <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
               <button
                 className="btn bsm"
-                style={{ flex: 1, background:"#fff7ed", color:"#9a3412", border:"2px solid #fdba74" }}
+                style={{ flex: 1, background:'rgba(251,146,60,.12)', color:'#fff7ed', border:'2px solid rgba(251,146,60,.44)', boxShadow:'0 10px 24px rgba(251,146,60,.08)' }}
                 onClick={async () => {
                   await db.takeCoins(c.id, penaltyValue(c), penaltyReasonValue(c));
                   setPenaltyDrafts(s => ({ ...s, [c.id]: "" }));
@@ -3692,9 +3703,9 @@ function KidsTab({ data, db, setModal }) {
                 disabled={!(Number(penaltyValue(c)) > 0) || !String(penaltyReasonValue(c) || "").trim()}
               >➖ Ecoins afpakken</button>
             </div>
-            <div style={{ fontSize: 12, color: "#9a3412", marginBottom: 12 }}>Het kind ziet deze straf met reden terug in zijn geschiedenis.</div>
+            <div style={{ fontSize: 12, color: '#fdba74', marginBottom: 12, lineHeight:1.45 }}>Het kind ziet deze straf met reden terug in zijn geschiedenis.</div>
 
-            <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delChild(c.id)}>Verwijder</button>
+            <button className="btn bh bsm" style={{ color: '#fecaca', borderColor:'rgba(248,113,113,.32)', background:'rgba(127,29,29,.12)' }} onClick={() => db.delChild(c.id)}>Verwijder</button>
           </div>
         ))}
         {data.children.length === 0 && <div className="emp" style={{ gridColumn: "1/-1" }}><div className="ei">👶</div><div className="et">Nog geen kinderen</div></div>}
@@ -3710,18 +3721,18 @@ function SettingsTab({ data, db, parentPin }) {
     <div>
       <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Instellingen ⚙️</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
       <div className="g2">
-        <div className="card">
+        <div className="card dark-form">
           <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🔐 Ouder login</div>
           <div className="fg">
             <label className="fl">Oudercode (6 cijfers)</label>
             <input className="fi" inputMode="numeric" maxLength={6} value={pinDraft} onChange={e => setPinDraft(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="258000" />
           </div>
-          <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12 }}>Deze oudercode wordt via Supabase gedeeld tussen apparaten.</div>
+          <div style={{ fontSize: 12, color: 'rgba(226,232,240,.86)', marginBottom: 12 }}>Deze oudercode wordt via Supabase gedeeld tussen apparaten.</div>
           <button className="btn bp" onClick={() => db.updateParentPin(pinDraft)} disabled={!/^\d{6}$/.test(pinDraft)}>6-cijferige code opslaan</button>
         </div>
-        <div className="card">
+        <div className="card dark-form">
           <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🪙 Coins beheren</div>
-          <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 14 }}>Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.</div>
+          <div style={{ fontSize: 13, color: 'rgba(226,232,240,.78)', marginBottom: 14, lineHeight:1.5 }}>Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.</div>
           <button className="btn bh" style={{ color: "var(--red)" }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
           <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
         </div>
