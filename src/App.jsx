@@ -1794,12 +1794,14 @@ export default function App() {
     if (!templateTasks.length) return;
 
     const inserts = [];
+    const plannedKeys = new Set();
 
     for (const templateTask of templateTasks) {
       const occurrenceDate = getRecurringOccurrenceDate(templateTask, referenceDate);
       if (!occurrenceDate) continue;
 
       const templateInfo = parseTaskDesc(templateTask.desc, templateTask.coins);
+      const occurrenceKey = [templateTask.childId, templateTask.id, occurrenceDate].join("__");
       const exists = data.tasks.some((task) => {
         if (isRecurringTemplateTask(task)) return false;
         if (task.childId !== templateTask.childId || task.date !== occurrenceDate) return false;
@@ -1807,7 +1809,8 @@ export default function App() {
         return info.recurrenceSourceId === templateTask.id;
       });
 
-      if (exists) continue;
+      if (exists || plannedKeys.has(occurrenceKey)) continue;
+      plannedKeys.add(occurrenceKey);
 
       inserts.push({
         id: genId(),
@@ -2535,7 +2538,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
-  const activeTasks = data.tasks
+  const activeTasks = dedupeVisibleTasks(data.tasks
     .filter(t =>
       t.childId === activeKid &&
       !isRecurringTemplateTask(t) &&
@@ -2543,7 +2546,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
       getTaskRemainingCoins(t, todayNow) > 0 &&
       shouldKeepCompletedVisible(t, todayNow) &&
       (t.status !== "pending" || isTaskVisibleForChildNow(t))
-    )
+    ))
     .sort((a, b) => {
       const sectionDiff = CHILD_TASK_SECTIONS.findIndex(s => s.key === getTaskSectionKey(a)) - CHILD_TASK_SECTIONS.findIndex(s => s.key === getTaskSectionKey(b));
       if (sectionDiff !== 0) return sectionDiff;
