@@ -2538,8 +2538,16 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
       <div className="home-kids">
         {data.children.map(c => {
           const th = getChildTheme(c);
-          const todayDone = data.tasks.filter(t => t.childId === c.id && !isRecurringTemplateTask(t) && t.date === today && t.status !== "pending").length;
-          const todayTotal = data.tasks.filter(t => t.childId === c.id && !isRecurringTemplateTask(t) && t.date === today && (t.status !== "pending" || isTaskVisibleForChildNow(t))).length;
+          const homeVisibleTasks = dedupeVisibleTasks(data.tasks.filter(t =>
+            t.childId === c.id &&
+            !isRecurringTemplateTask(t) &&
+            t.date <= today &&
+            getTaskRemainingCoins(t, today) > 0 &&
+            shouldKeepCompletedVisible(t, today) &&
+            (t.status !== "pending" || isTaskVisibleForChildNow(t))
+          ));
+          const todayDone = homeVisibleTasks.filter(t => t.status !== "pending").length;
+          const todayTotal = homeVisibleTasks.length;
           return (
             <div key={c.id} className="home-kid"
               style={{ border: `3px solid ${th.pri}44` }}
