@@ -1955,7 +1955,7 @@ export default function App() {
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(null);
   const [activeKid, setActiveKid] = useState(null);
-  const [tab,       setTab]       = useState("tasks");
+  const [tab,       setTab]       = useState("dashboard");
   const [kidTab,    setKidTab]    = useState("tasks");
   const [prevApproved, setPrevApproved] = useState({});
   const [showCoins,    setShowCoins]    = useState(null);
@@ -3187,6 +3187,232 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
 }
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
+
+function ParentDashboard({ data, db, setModal, setTab }) {
+  const todayNow = getTodayISO();
+  const now = new Date();
+  const pendingApprovals = data.tasks.filter(t => t.status === "done");
+  const pendingRedemptions = data.redemptions.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
+
+  const softBg = "radial-gradient(circle at top left, #18233f 0%, #11182e 42%, #0c1225 100%)";
+  const shell = { background: softBg, border: '1px solid rgba(125,156,255,0.18)', borderRadius: 28, padding: 20, boxShadow: '0 28px 60px rgba(6,12,30,0.45)', color: '#eef2ff' };
+  const panel = { background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.025))', border: '1px solid rgba(148,163,184,0.18)', borderRadius: 24, boxShadow: '0 12px 30px rgba(0,0,0,0.18)' };
+
+  const visibleOpenTasksForChild = (childId) => dedupeVisibleTasks(
+    data.tasks.filter(t => {
+      if (t.childId !== childId) return false;
+      if (isRecurringTemplateTask(t)) return false;
+      if (t.status !== 'pending') return false;
+      if (getTaskRemainingCoins(t, todayNow) <= 0) return false;
+      if (!shouldKeepCompletedVisible(t, todayNow)) return false;
+      return isTaskVisibleForChildNow(t, now);
+    })
+  );
+
+  const approvedThisWeekForChild = (childId) => data.tasks.filter(t => {
+    if (t.childId !== childId || t.status !== 'approved') return false;
+    const info = parseTaskDesc(t.desc, t.coins);
+    const anchor = info.approvedOn || info.doneOn || t.date;
+    return diffDays(anchor, todayNow) <= 6;
+  });
+
+  const nearlyExpiredWeekly = dedupeVisibleTasks(
+    data.tasks.filter(t => {
+      if (isRecurringTemplateTask(t)) return false;
+      if (t.status !== 'pending') return false;
+      const info = parseTaskDesc(t.desc, t.coins);
+      if (info.dayPart !== 'weekly') return false;
+      const daysLeft = getTaskDaysLeft(t, todayNow);
+      return daysLeft > 0 && daysLeft <= 2;
+    })
+  ).sort((a,b)=> getTaskDaysLeft(a, todayNow)-getTaskDaysLeft(b,todayNow));
+
+  const recentActivities = [
+    ...data.tasks.filter(t => t.status === 'approved').map(t => {
+      const ch = data.children.find(c => c.id === t.childId);
+      const info = parseTaskDesc(t.desc, t.coins);
+      const when = info.approvedOn || info.doneOn || t.date;
+      return { key:`task-${t.id}`, date: when, emoji:'✅', color:'#86efac', text: `${ch?.name || 'Kind'} rondde ${t.title.toLowerCase()} af`, meta:`+${t.coins} coins` };
+    }),
+    ...data.redemptions.filter(r => r.status === 'approved' && !isPenaltyRedemption(r)).map(r => {
+      const ch = data.children.find(c => c.id === r.childId);
+      return { key:`red-${r.id}`, date:r.date, emoji:r.rewardEmoji || '🎁', color:'#f9a8d4', text:`${ch?.name || 'Kind'} kocht ${String(r.rewardTitle || '').toLowerCase()}`, meta:`-${r.cost} coins` };
+    })
+  ].sort((a,b)=> String(b.date).localeCompare(String(a.date))).slice(0,5);
+
+  const childCards = data.children.map((child, idx) => {
+    const life = getChildLifetimeCoinsValue(child, data.lifetimeCoinsMap || {});
+    const level = getLevelInfo(life);
+    const openTasks = visibleOpenTasksForChild(child.id);
+    const approvals = pendingApprovals.filter(t => t.childId === child.id).length;
+    const weeklyDone = approvedThisWeekForChild(child.id);
+    const weeklyCoins = weeklyDone.reduce((sum,t)=> sum + Number(t.coins || 0), 0);
+    const theme = idx % 2 === 0
+      ? { glow:'rgba(56,189,248,0.34)', border:'rgba(59,130,246,0.45)', accent:'#60a5fa', accent2:'#93c5fd', badgeBg:'rgba(59,130,246,0.14)' }
+      : { glow:'rgba(244,114,182,0.30)', border:'rgba(236,72,153,0.42)', accent:'#f472b6', accent2:'#f9a8d4', badgeBg:'rgba(236,72,153,0.13)' };
+    const progressWidth = `${Math.max(8, Math.round(level.progress * 100))}%`;
+    return { child, life, level, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth };
+  });
+
+  const attentionItems = [];
+  if (pendingApprovals.length) {
+    attentionItems.push({ key:'tasks', emoji:'📝', title:`${pendingApprovals.length} taak${pendingApprovals.length > 1 ? 'en' : ''} wachten op goedkeuring`, tone:'#fcd34d', onClick:()=>setTab('approve') });
+  }
+  if (pendingRedemptions.length) {
+    attentionItems.push({ key:'reds', emoji:'🛍️', title:`${pendingRedemptions.length} aankoop${pendingRedemptions.length > 1 ? 'en' : ''} wachten op goedkeuring`, tone:'#c4b5fd', onClick:()=>setTab('purchases') });
+  }
+  nearlyExpiredWeekly.slice(0,2).forEach((task) => {
+    const ch = data.children.find(c => c.id === task.childId);
+    const daysLeft = getTaskDaysLeft(task, todayNow);
+    attentionItems.push({ key:`wk-${task.id}`, emoji:'⏰', title:`${ch?.name || 'Kind'} · ${task.title}`, subtitle: daysLeft === 1 ? 'Laatste dag om af te ronden' : `Nog ${daysLeft} dagen over`, tone:'#fb7185', onClick:()=>setTab('tasks') });
+  });
+  if (!attentionItems.length) {
+    attentionItems.push({ key:'none', emoji:'✨', title:'Alles loopt netjes', subtitle:'Geen dringende acties voor vandaag', tone:'#86efac' });
+  }
+
+  const quickAction = (label, emoji, onClick, glow) => (
+    <button onClick={onClick} style={{ ...panel, cursor:'pointer', padding:'16px 18px', textAlign:'left', color:'#eef2ff', background:`linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)), ${glow}`, display:'flex', alignItems:'center', gap:12, borderRadius:18, border:'1px solid rgba(255,255,255,0.14)' }}>
+      <span style={{ fontSize:22 }}>{emoji}</span><span style={{ fontWeight:800, fontSize:16 }}>{label}</span>
+    </button>
+  );
+
+  return (
+    <div style={shell}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:16, flexWrap:'wrap', marginBottom:18 }}>
+        <div>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:38, fontWeight:800, lineHeight:1, marginBottom:4, color:'#c7d2fe' }}>Ouder Dashboard</div>
+          <div style={{ color:'rgba(226,232,240,0.78)', fontSize:16 }}>Overzicht van Kylian & Névah</div>
+        </div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          <button className="btn" style={{ background:'rgba(15,23,42,0.75)', color:'#e2e8f0', border:'1px solid rgba(148,163,184,0.22)' }} onClick={()=>setTab('settings')}>⚙️ Instellingen</button>
+          <button className="btn" style={{ background:'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(16,185,129,0.18))', color:'#dcfce7', border:'1px solid rgba(34,197,94,0.35)' }} onClick={()=>setModal({ type:'task' })}>➕ Nieuwe taak</button>
+          <button className="btn" style={{ background:'linear-gradient(135deg, rgba(168,85,247,0.18), rgba(236,72,153,0.18))', color:'#f5d0fe', border:'1px solid rgba(232,121,249,0.35)' }} onClick={()=>setTab('rewards')}>🎁 Beloningen</button>
+        </div>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:18, marginBottom:18 }}>
+        {childCards.map(({ child, life, level, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth }) => (
+          <div key={child.id} style={{ ...panel, padding:18, border:`1px solid ${theme.border}`, boxShadow:`0 0 0 1px ${theme.border} inset, 0 0 24px ${theme.glow}` }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:16, alignItems:'center', marginBottom:12 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+                <div style={{ width:72, height:72, borderRadius:'50%', background:theme.badgeBg, display:'grid', placeItems:'center', fontSize:40, boxShadow:`0 0 0 3px ${theme.border}, 0 0 22px ${theme.glow}` }}>{getChildAvatar(child)}</div>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:800 }}>{child.name}</div>
+                  <div style={{ color:theme.accent2, fontWeight:800, fontSize:14 }}>Level {level.level} — {level.name}</div>
+                </div>
+              </div>
+              <div style={{ minWidth:70, textAlign:'center', padding:'10px 12px', borderRadius:18, background:theme.badgeBg, border:`1px solid ${theme.border}` }}>
+                <div style={{ fontSize:12, color:'#cbd5e1' }}>Level</div>
+                <div style={{ fontSize:28, fontWeight:900, color:theme.accent }}>{level.level}</div>
+              </div>
+            </div>
+            <div style={{ marginBottom:14, padding:'14px 14px 12px', borderRadius:18, background:'rgba(15,23,42,0.48)', border:'1px solid rgba(148,163,184,0.14)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginBottom:8, fontWeight:800 }}>
+                <span>{life} / {level.isMax ? level.coins : level.nextMin} lifetime coins</span>
+                <span style={{ color:theme.accent }}>{Math.round(level.progress * 100)}%</span>
+              </div>
+              <div style={{ height:12, borderRadius:999, background:'rgba(255,255,255,0.08)', overflow:'hidden' }}>
+                <div style={{ width:progressWidth, height:'100%', borderRadius:999, background:`linear-gradient(90deg, ${theme.accent}, ${theme.accent2})`, boxShadow:`0 0 14px ${theme.glow}` }} />
+              </div>
+              <div style={{ marginTop:8, color:'rgba(226,232,240,0.76)', fontSize:13 }}>{level.isMax ? 'Max level bereikt' : `Nog ${level.remaining} lifetime coins tot level ${level.nextLevel}`}</div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+              {[
+                { label:'coins', value:child.coins, emoji:'🪙', tone:'#fbbf24' },
+                { label:'open taken', value:openTasks.length, emoji:'📋', tone:'#93c5fd' },
+                { label:'goedk.', value:approvals, emoji:'✅', tone:'#86efac' },
+              ].map(stat => (
+                <div key={stat.label} style={{ padding:'12px 10px', borderRadius:16, background:'rgba(15,23,42,0.44)', border:'1px solid rgba(148,163,184,0.14)' }}>
+                  <div style={{ fontSize:12, color:'rgba(226,232,240,0.72)', marginBottom:4 }}>{stat.emoji} {stat.label}</div>
+                  <div style={{ fontWeight:900, fontSize:26, color:stat.tone }}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:18, marginBottom:18 }}>
+        <div style={{ ...panel, padding:18, minHeight:250 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>📅 Weekvoortgang</div>
+          <div style={{ display:'grid', gap:14 }}>
+            {childCards.map(({ child, weeklyDone, weeklyCoins, theme }) => {
+              const doneCount = weeklyDone.length;
+              const progress = Math.min(1, doneCount / 7);
+              return (
+                <div key={`weekly-${child.id}`} style={{ padding:14, borderRadius:18, background:'rgba(15,23,42,0.44)', border:'1px solid rgba(148,163,184,0.14)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginBottom:10 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:10 }}><span style={{ fontSize:26 }}>{getChildAvatar(child)}</span><span style={{ fontSize:18, fontWeight:800 }}>{child.name}</span></div>
+                    <div style={{ fontWeight:800, color:'#fcd34d' }}>+{weeklyCoins} coins</div>
+                  </div>
+                  <div style={{ height:10, borderRadius:999, background:'rgba(255,255,255,0.07)', overflow:'hidden', marginBottom:8 }}><div style={{ width:`${Math.max(6, Math.round(progress*100))}%`, height:'100%', background:`linear-gradient(90deg, ${theme.accent}, ${theme.accent2})`, borderRadius:999 }} /></div>
+                  <div style={{ color:'rgba(226,232,240,0.74)', fontSize:13 }}>{doneCount} afgeronde taken deze week</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ ...panel, padding:18, minHeight:250 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>⚡ Snelle acties</div>
+          <div style={{ display:'grid', gap:12 }}>
+            {quickAction('Nieuwe taak', '➕', ()=>setModal({ type:'task' }), 'linear-gradient(135deg, rgba(59,130,246,0.14), rgba(14,165,233,0.08))')}
+            {quickAction('Weektaken bekijken', '📅', ()=>setTab('tasks'), 'linear-gradient(135deg, rgba(236,72,153,0.12), rgba(168,85,247,0.08))')}
+            {quickAction('Beloning toevoegen', '🎁', ()=>setModal({ type:'reward' }), 'linear-gradient(135deg, rgba(245,158,11,0.14), rgba(251,191,36,0.08))')}
+            {quickAction('Coins aanpassen', '🪙', ()=>setTab('kids'), 'linear-gradient(135deg, rgba(34,197,94,0.14), rgba(16,185,129,0.08))')}
+          </div>
+        </div>
+
+        <div style={{ ...panel, padding:18, minHeight:250 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>💡 Vandaag aandacht</div>
+          <div style={{ display:'grid', gap:12 }}>
+            {attentionItems.slice(0,4).map(item => (
+              <button key={item.key} onClick={item.onClick} style={{ textAlign:'left', padding:'14px 14px', borderRadius:18, border:`1px solid ${item.tone}33`, background:'rgba(15,23,42,0.46)', color:'#eef2ff', cursor:item.onClick?'pointer':'default' }}>
+                <div style={{ fontWeight:800 }}>{item.emoji} {item.title}</div>
+                {item.subtitle && <div style={{ fontSize:13, color:'rgba(226,232,240,0.72)', marginTop:4 }}>{item.subtitle}</div>}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:18 }}>
+        <div style={{ ...panel, padding:18 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>🧾 Recente activiteit</div>
+          {recentActivities.length === 0 ? (
+            <div style={{ color:'rgba(226,232,240,0.72)', fontSize:14 }}>Nog geen recente activiteit zichtbaar.</div>
+          ) : (
+            <div style={{ display:'grid', gap:12 }}>
+              {recentActivities.map(item => (
+                <div key={item.key} style={{ display:'flex', gap:12, alignItems:'flex-start', paddingBottom:12, borderBottom:'1px solid rgba(148,163,184,0.12)' }}>
+                  <div style={{ width:34, height:34, borderRadius:'50%', background:`${item.color}22`, display:'grid', placeItems:'center', fontSize:18 }}>{item.emoji}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:700 }}>{item.text}</div>
+                    <div style={{ fontSize:13, color:'rgba(226,232,240,0.68)', marginTop:3 }}>{item.meta}</div>
+                  </div>
+                  <div style={{ fontSize:12, color:'rgba(226,232,240,0.58)', whiteSpace:'nowrap' }}>{item.date}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ ...panel, padding:18 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>📌 Vandaag gepland</div>
+          <div style={{ display:'grid', gap:12 }}>
+            {childCards.map(({ child, openTasks }) => (
+              <button key={`planned-${child.id}`} onClick={()=>setTab('tasks')} style={{ textAlign:'left', padding:'15px 16px', borderRadius:18, border:'1px solid rgba(148,163,184,0.16)', background:'rgba(15,23,42,0.44)', color:'#eef2ff', display:'flex', justifyContent:'space-between', alignItems:'center', gap:14 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}><span style={{ fontSize:26 }}>{getChildAvatar(child)}</span><div><div style={{ fontWeight:800 }}>{child.name}</div><div style={{ fontSize:13, color:'rgba(226,232,240,0.68)' }}>{openTasks.length} actieve taken zichtbaar</div></div></div>
+                <div style={{ fontWeight:900, color:'#c7d2fe' }}>{openTasks.length}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
@@ -3194,28 +3420,33 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <div>
-          <h1 style={{ fontFamily: "'Baloo 2',cursive", fontSize: 24, fontWeight: 800, marginBottom: 3 }}>Ouderoverzicht 👨‍👩‍👧</h1>
-          <p style={{ color: "var(--t2)", fontSize: 13 }}>Beheer taken, kinderen en beloningen</p>
-        </div>
-        {(pending.length > 0 || pendingRedemptions.length > 0) && (
-          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-            {pending.length > 0 && (
-              <div style={{ background: "var(--yel-l)", border: "2px solid var(--yel)", borderRadius: 10, padding: "7px 14px", fontWeight: 700, fontSize: 13, color: "#b45309" }}>
-                ⏳ {pending.length} taak{pending.length > 1 ? "en" : ""} wacht op goedkeuring
-              </div>
-            )}
-            {pendingRedemptions.length > 0 && (
-              <div style={{ background: "#fce7ff", border: "2px solid #d946a8", borderRadius: 10, padding: "7px 14px", fontWeight: 700, fontSize: 13, color: "#a8157c" }}>
-                🛍️ {pendingRedemptions.length} aankoop{pendingRedemptions.length > 1 ? "en" : ""} wacht op goedkeuring
-              </div>
-            )}
+      {tab === "dashboard" ? (
+        <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} />
+      ) : (
+        <div style={{ marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <h1 style={{ fontFamily: "'Baloo 2',cursive", fontSize: 24, fontWeight: 800, marginBottom: 3 }}>Ouderoverzicht 👨‍👩‍👧</h1>
+            <p style={{ color: "var(--t2)", fontSize: 13 }}>Beheer taken, kinderen en beloningen</p>
           </div>
-        )}
-      </div>
-      <div className="tabs">
+          {(pending.length > 0 || pendingRedemptions.length > 0) && (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {pending.length > 0 && (
+                <div style={{ background: "var(--yel-l)", border: "2px solid var(--yel)", borderRadius: 10, padding: "7px 14px", fontWeight: 700, fontSize: 13, color: "#b45309" }}>
+                  ⏳ {pending.length} taak{pending.length > 1 ? "en" : ""} wacht op goedkeuring
+                </div>
+              )}
+              {pendingRedemptions.length > 0 && (
+                <div style={{ background: "#fce7ff", border: "2px solid #d946a8", borderRadius: 10, padding: "7px 14px", fontWeight: 700, fontSize: 13, color: "#a8157c" }}>
+                  🛍️ {pendingRedemptions.length} aankoop{pendingRedemptions.length > 1 ? "en" : ""} wacht op goedkeuring
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="tabs" style={{ marginTop: tab === 'dashboard' ? 18 : 0 }}>
         {[
+          ["dashboard", "📊 Dashboard"],
           ["tasks",   "📋 Taken"],
           ["approve", `✅ Goedkeuren${pending.length ? ` (${pending.length})` : ""}`],
           ["kids",    "👶 Kinderen"],
@@ -3322,7 +3553,7 @@ function TasksTab({ data, db, setModal, getChild }) {
                 </div>
               </div>
               <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>{getCoinLabel(t)} <span style={{ fontSize: 11, color: "var(--t2)" }}>/ {info.maxCoins}</span></span>
-              <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button>
+              {t.status === "pending" ? <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button> : <span style={{ width: 36, textAlign: "center", opacity: 0.45, fontSize: 15 }}>🔒</span>}
             </div>
           );
         })
