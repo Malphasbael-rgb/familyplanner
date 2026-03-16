@@ -3685,7 +3685,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
   ].sort((a,b)=> String(b.date).localeCompare(String(a.date))).slice(0,5);
 
   const childCards = data.children.map((child, idx) => {
-    const life = getChildLifetimeCoinsValue(child, data.lifetimeCoinsMap || {});
+    const life = getLifetimeCoinsForChild(child.id);
     const level = getLevelInfo(life);
     const openTasks = visibleOpenTasksForChild(child.id);
     const approvals = pendingApprovals.filter(t => t.childId === child.id).length;
