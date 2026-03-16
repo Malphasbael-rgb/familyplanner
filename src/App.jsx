@@ -1621,6 +1621,9 @@ const CSS = `
   .parent-quiet .tab.on{color:#ffffff!important}
   .parent-quiet .card,.parent-quiet .tr{color:#eef4ff}
   .parent-quiet .emp,.parent-quiet .muted,.parent-quiet .help,.parent-quiet small{color:#d7e3f4!important}
+  .parent-quiet .bh{background:rgba(30,41,59,.92)!important;color:#eef4ff!important;border-color:rgba(148,163,184,.30)!important}
+  .parent-quiet .bh:hover{border-color:rgba(129,140,248,.55)!important;color:#ffffff!important}
+  .parent-quiet .bp{box-shadow:0 10px 24px rgba(79,70,229,.20)!important}
   .parent-quiet button,.parent-quiet input,.parent-quiet select,.parent-quiet textarea{font-weight:700}
   .ft{resize:vertical;min-height:65px}
   .fr{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -4022,7 +4025,7 @@ function SettingsTab({ data, db, parentPin }) {
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
   return (
     <div>
-      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Instellingen ⚙️</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.80), rgba(15,23,42,.64))', border:'1px solid rgba(148,163,184,.16)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#f8fbff' }}>Instellingen ⚙️</div><div style={{ color:'rgba(241,245,249,.88)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
       <div className="g2">
         <div className="card dark-form">
           <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🔐 Ouder login</div>
@@ -4037,7 +4040,7 @@ function SettingsTab({ data, db, parentPin }) {
           <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🪙 Coins beheren</div>
           <div style={{ fontSize: 13, color: 'rgba(226,232,240,.78)', marginBottom: 14, lineHeight:1.5 }}>Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.</div>
           <button className="btn bh" style={{ color: "var(--red)" }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
-          <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
+          <div style={{ fontSize: 12, color: 'rgba(241,245,249,.9)', marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
         </div>
       </div>
     </div>
@@ -4092,7 +4095,7 @@ function PurchasesTab({ data, db, getChild }) {
         <div style={{ fontSize:32 }}>{r.rewardEmoji}</div>
         <div style={{ flex:1, minWidth:120 }}>
           <div style={{ fontWeight:800, fontSize:15 }}>{penalty ? "Ecoins afgepakt" : r.rewardTitle}</div>
-          <div style={{ fontSize:12, color:"var(--t2)", display:"flex", gap:8, marginTop:2, flexWrap:"wrap" }}>
+          <div style={{ fontSize:12, color:'rgba(226,232,240,.92)', display:"flex", gap:8, marginTop:2, flexWrap:"wrap" }}>
             {ch && <span>{ch.avatar} {ch.name}</span>}
             <span>📅 {r.date}</span>
           </div>
@@ -4112,7 +4115,7 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.80), rgba(15,23,42,.64))', border:'1px solid rgba(148,163,184,.16)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#f8fbff' }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(241,245,249,.88)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
 
       {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
@@ -4135,7 +4138,7 @@ function PurchasesTab({ data, db, getChild }) {
       {/* Eerder behandeld */}
       {restList.length > 0 && (
         <div>
-          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:"var(--t2)", marginBottom:10 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'rgba(241,245,249,.92)', marginBottom:10 }}>
             Eerder behandeld
           </div>
           {restList.map(r => <RedemptionRow key={r.id} r={r} />)}
