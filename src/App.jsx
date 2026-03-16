@@ -4080,33 +4080,63 @@ function PurchasesTab({ data, db, getChild }) {
   const pendingList  = sorted.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
   const restList     = sorted.filter(r => r.status !== "pending" || isPenaltyRedemption(r));
 
+  const headCard = {
+    marginTop:18,
+    marginBottom:16,
+    background:'linear-gradient(180deg, rgba(88,100,124,.96), rgba(114,126,150,.88))',
+    border:'1px solid rgba(148,163,184,.24)',
+    borderRadius:22,
+    padding:18,
+    boxShadow:'0 12px 30px rgba(15,23,42,.10)'
+  };
+  const rowBase = {
+    border:'1px solid rgba(148,163,184,.22)',
+    borderRadius:20,
+    flexWrap:'wrap',
+    gap:8,
+    boxShadow:'0 10px 24px rgba(15,23,42,.08)',
+    color:'#1f2a44'
+  };
+  const chipBtn = (active) => ({
+    background: active ? 'rgba(99,102,241,.18)' : 'rgba(107,114,128,.18)',
+    color: '#f8fafc',
+    border:'1px solid rgba(148,163,184,.24)'
+  });
+
   const statusLabel = (r) => {
-    if (isPenaltyRedemption(r)) return <span style={{ background:"#fff7ed", color:"#9a3412", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
-    if (r.status === "approved") return <span style={{ background:"#d1fae5", color:"#065f46", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
-    if (r.status === "rejected") return <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
-    return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:50, padding:"2px 10px", fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
+    if (isPenaltyRedemption(r)) return <span style={{ background:'rgba(251,146,60,.16)', color:'#9a3412', border:'1px solid rgba(251,146,60,.24)', borderRadius:50, padding:'2px 10px', fontSize:11, fontWeight:800 }}>⚠️ Straf uitgevoerd</span>;
+    if (r.status === 'approved') return <span style={{ background:'rgba(34,197,94,.14)', color:'#166534', border:'1px solid rgba(34,197,94,.2)', borderRadius:50, padding:'2px 10px', fontSize:11, fontWeight:800 }}>✅ Goedgekeurd</span>;
+    if (r.status === 'rejected') return <span style={{ background:'rgba(239,68,68,.14)', color:'#991b1b', border:'1px solid rgba(239,68,68,.18)', borderRadius:50, padding:'2px 10px', fontSize:11, fontWeight:800 }}>❌ Afgewezen</span>;
+    return <span style={{ background:'rgba(245,158,11,.16)', color:'#92400e', border:'1px solid rgba(245,158,11,.22)', borderRadius:50, padding:'2px 10px', fontSize:11, fontWeight:800 }}>⏳ Wacht op goedkeuring</span>;
   };
 
   const RedemptionRow = ({ r }) => {
     const ch = getChild(r.childId);
     const penalty = isPenaltyRedemption(r);
+    const bg = penalty
+      ? 'linear-gradient(180deg, rgba(255,247,237,.96), rgba(255,237,213,.88))'
+      : r.status === 'approved'
+        ? 'linear-gradient(180deg, rgba(240,253,244,.96), rgba(220,252,231,.88))'
+        : r.status === 'rejected'
+          ? 'linear-gradient(180deg, rgba(254,242,242,.96), rgba(254,226,226,.88))'
+          : 'linear-gradient(180deg, rgba(88,100,124,.96), rgba(114,126,150,.88))';
     return (
-      <div className="tr" style={{ background: penalty ? "rgba(154,52,18,.10)" : r.status === "approved" ? "rgba(34,197,94,.10)" : r.status === "rejected" ? "rgba(248,113,113,.10)" : "linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))", border:"1px solid rgba(148,163,184,.14)", borderRadius:20, flexWrap:"wrap", gap:8, boxShadow:"0 18px 40px rgba(2,6,23,.14)", color:"#eef2ff" }}>
+      <div className="tr" style={{ ...rowBase, background:bg }}>
         <div style={{ fontSize:32 }}>{r.rewardEmoji}</div>
         <div style={{ flex:1, minWidth:120 }}>
-          <div style={{ fontWeight:800, fontSize:15 }}>{penalty ? "Ecoins afgepakt" : r.rewardTitle}</div>
-          <div style={{ fontSize:12, color:'rgba(226,232,240,.92)', display:"flex", gap:8, marginTop:2, flexWrap:"wrap" }}>
+          <div style={{ fontWeight:800, fontSize:15, color:'#172033' }}>{penalty ? 'Ecoins afgepakt' : r.rewardTitle}</div>
+          <div style={{ fontSize:12, color:'rgba(31,42,68,.78)', display:'flex', gap:8, marginTop:2, flexWrap:'wrap' }}>
             {ch && <span>{ch.avatar} {ch.name}</span>}
             <span>📅 {r.date}</span>
           </div>
-          {penalty && <div style={{ fontSize:12, color:"#9a3412", marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
+          {penalty && <div style={{ fontSize:12, color:'#9a3412', marginTop:5, fontWeight:700 }}>Reden: {getPenaltyReason(r)}</div>}
           <div style={{ marginTop:5 }}>{statusLabel(r)}</div>
         </div>
-        <div style={{ fontWeight:900, color: penalty ? "#c2410c" : "var(--yel)", fontSize:16, whiteSpace:"nowrap" }}>{penalty ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`}</div>
-        {!penalty && r.status === "pending" && (
-          <div style={{ display:"flex", gap:6 }}>
+        <div style={{ fontWeight:900, color: penalty ? '#c2410c' : '#7c5d00', fontSize:16, whiteSpace:'nowrap' }}>{penalty ? `➖ ${Math.abs(r.cost)}` : `🪙 ${r.cost}`}</div>
+        {!penalty && r.status === 'pending' && (
+          <div style={{ display:'flex', gap:6 }}>
             <button className="btn bg bsm" onClick={() => db.approveRedemption(r.id)}>✅ Goedkeuren</button>
-            <button className="btn bsm" style={{ background:"var(--red-l)", color:"var(--red)", border:"none" }} onClick={() => db.rejectRedemption(r.id)}>❌ Afwijzen</button>
+            <button className="btn bsm" style={{ background:'rgba(239,68,68,.12)', color:'#991b1b', border:'1px solid rgba(239,68,68,.16)' }} onClick={() => db.rejectRedemption(r.id)}>❌ Afwijzen</button>
           </div>
         )}
       </div>
@@ -4115,30 +4145,27 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#eef2ff' }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(226,232,240,.82)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
+      <div style={headCard}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#1f2a44' }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(31,42,68,.74)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
 
-      {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
-        <button className="btn bsm" style={{ background: filter==="all" ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'rgba(255,255,255,.08)', color: filter==="all" ? '#ffffff' : '#dce7f5', border:'1px solid rgba(148,163,184,.18)' }} onClick={() => setFilter("all")}>Alle kinderen</button>
+        <button className="btn bsm" style={chipBtn(filter==='all')} onClick={() => setFilter('all')}>Alle kinderen</button>
         {data.children.map(c => (
-          <button key={c.id} className="btn bsm" style={{ background: filter===c.id ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'rgba(255,255,255,.08)', color: filter===c.id ? '#ffffff' : '#dce7f5', border:'1px solid rgba(148,163,184,.18)' }} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
+          <button key={c.id} className="btn bsm" style={chipBtn(filter===c.id)} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
         ))}
       </div>
 
-      {/* Wacht op goedkeuring */}
       {pendingList.length > 0 && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'#eef2ff', marginBottom:10 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'#1f2a44', marginBottom:10 }}>
             ⏳ Wacht op jouw goedkeuring
           </div>
           {pendingList.map(r => <RedemptionRow key={r.id} r={r} />)}
         </div>
       )}
 
-      {/* Eerder behandeld */}
       {restList.length > 0 && (
         <div>
-          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'#eef2ff', marginBottom:10 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'#1f2a44', marginBottom:10 }}>
             Eerder behandeld
           </div>
           {restList.map(r => <RedemptionRow key={r.id} r={r} />)}
