@@ -1078,7 +1078,7 @@ const FEITJES = [
   { feit: "Een octopus is slim genoeg om potjes open te maken.", emoji: "🫙" },
   { feit: "Dolfijnen slapen nooit helemaal tegelijk met hun hele brein.", emoji: "🧠" },
   { feit: "Een pijlstaartrog lijkt onder water soms te vliegen als een ruimteschip-pannenkoek.", emoji: "🥞" },
-];];
+];
 
 const INIT = {
   children: [
