@@ -3682,11 +3682,15 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
   ).sort((a,b)=> getTaskDaysLeft(a, todayNow)-getTaskDaysLeft(b,todayNow));
 
   const recentActivities = [
-    ...data.tasks.filter(t => t.status === 'approved').map(t => {
+    ...dedupeVisibleTasks(data.tasks.filter(t => {
+      if (isRecurringTemplateTask(t)) return false;
+      return getEffectiveTaskStatus(t) === 'approved';
+    })).map(t => {
       const ch = data.children.find(c => c.id === t.childId);
       const info = parseTaskDesc(t.desc, t.coins);
       const when = info.approvedOn || info.doneOn || t.date;
-      return { key:`task-${t.id}`, date: when, emoji:'✅', color:'#86efac', text: `${ch?.name || 'Kind'} rondde ${t.title.toLowerCase()} af`, meta:`+${t.coins} coins` };
+      const earned = Number(info.completedCoinsLocked ?? t.coins ?? 0);
+      return { key:`task-${t.id}`, date: when, emoji:'✅', color:'#86efac', text: `${ch?.name || 'Kind'} rondde ${String(t.title || '').toLowerCase()} af`, meta:`+${earned} coins` };
     }),
     ...data.redemptions.filter(r => r.status === 'approved' && !isPenaltyRedemption(r)).map(r => {
       const ch = data.children.find(c => c.id === r.childId);
