@@ -1612,12 +1612,15 @@ const CSS = `
   .dark-form .fi,.dark-form .fs,.dark-form .ft{background:rgba(255,255,255,.96);color:#0f172a;border-color:rgba(148,163,184,.28)}
   .dark-form .fi::placeholder,.dark-form .fs::placeholder,.dark-form .ft::placeholder{color:#64748b}
   .dark-form .fi:focus,.dark-form .fs:focus,.dark-form .ft:focus{background:#fff;border-color:#818cf8;box-shadow:0 0 0 4px rgba(129,140,248,.14)}
-  .parent-quiet .fl{color:rgba(241,245,249,.96)!important;font-weight:800;letter-spacing:.01em}
-  .parent-quiet .fi,.parent-quiet .fs,.parent-quiet .ft{background:rgba(255,255,255,.98)!important;color:#0f172a!important;border-color:rgba(148,163,184,.34)!important}
+  .parent-quiet{--t1:#f8fbff;--t2:#dbe7f5;--bor:rgba(148,163,184,.22)}
+  .parent-quiet .fl{color:#f8fbff!important;font-weight:800;letter-spacing:.01em}
+  .parent-quiet .fi,.parent-quiet .fs,.parent-quiet .ft{background:rgba(255,255,255,.99)!important;color:#0f172a!important;border-color:rgba(148,163,184,.38)!important}
   .parent-quiet .fi::placeholder,.parent-quiet .fs::placeholder,.parent-quiet .ft::placeholder{color:#64748b!important;opacity:1}
   .parent-quiet .fi:focus,.parent-quiet .fs:focus,.parent-quiet .ft:focus{background:#fff!important;border-color:#818cf8!important;box-shadow:0 0 0 4px rgba(129,140,248,.18)!important}
-  .parent-quiet .tab{color:rgba(241,245,249,.88)!important}
-  .parent-quiet .tab.on{color:#f8fafc!important}
+  .parent-quiet .tab{color:#e6eef8!important}
+  .parent-quiet .tab.on{color:#ffffff!important}
+  .parent-quiet .card,.parent-quiet .tr{color:#eef4ff}
+  .parent-quiet .emp,.parent-quiet .muted,.parent-quiet .help,.parent-quiet small{color:#d7e3f4!important}
   .parent-quiet button,.parent-quiet input,.parent-quiet select,.parent-quiet textarea{font-weight:700}
   .ft{resize:vertical;min-height:65px}
   .fr{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -3745,7 +3748,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
             <div>
               <h1 style={{ fontFamily: "'Baloo 2',cursive", fontSize: 30, fontWeight: 800, marginBottom: 4, color:'#eef2ff' }}>Ouderportaal ✨</h1>
-              <p style={{ color: "rgba(226,232,240,0.84)", fontSize: 14 }}>Zelfde rustige dashboardstijl, maar met focus op overzicht en sneller beheren.</p>
+              <p style={{ color: "#dce7f5", fontSize: 14 }}>Zelfde rustige dashboardstijl, maar met focus op overzicht en sneller beheren.</p>
             </div>
             {(pending.length > 0 || pendingRedemptions.length > 0) && (
               <div style={{ display:"flex", flexDirection:"column", gap:8, minWidth:240 }}>
@@ -3764,7 +3767,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
           </div>
         </div>
       )}
-      <div className="tabs" style={{ marginTop: tab === 'dashboard' ? 18 : 0, background:'rgba(15,23,42,.62)', padding:6, borderRadius:999, border:'1px solid rgba(148,163,184,.14)', width:'100%', overflowX:'auto', flexWrap:'nowrap' }}>
+      <div className="tabs" style={{ marginTop: tab === 'dashboard' ? 18 : 0, background:'rgba(15,23,42,.72)', padding:6, borderRadius:999, border:'1px solid rgba(148,163,184,.20)', width:'100%', overflowX:'auto', flexWrap:'nowrap' }}>
         {[
           ["dashboard", "📊 Dashboard"],
           ["tasks",   "📋 Taken"],
@@ -3784,7 +3787,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
               border: 'none',
               whiteSpace:'nowrap',
               background: tab === k ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'transparent',
-              color: tab === k ? '#eef2ff' : 'rgba(226,232,240,.78)',
+              color: tab === k ? '#ffffff' : '#dce7f5',
               boxShadow: tab === k ? 'inset 0 0 0 1px rgba(129,140,248,.26), 0 8px 20px rgba(15,23,42,.18)' : 'none',
               fontWeight: 800,
               minWidth: 'fit-content'
@@ -3846,7 +3849,7 @@ function TasksTab({ data, db, setModal, getChild }) {
   };
 
   const FilterChip = ({ active, onClick, children }) => (
-    <button onClick={onClick} style={{ border:'none', borderRadius:999, padding:'10px 14px', fontWeight:800, cursor:'pointer', background: active ? 'linear-gradient(135deg, rgba(99,102,241,.26), rgba(59,130,246,.16))' : 'rgba(255,255,255,.05)', color: active ? '#eef2ff' : 'rgba(226,232,240,.86)', boxShadow: active ? 'inset 0 0 0 1px rgba(129,140,248,.22)' : 'inset 0 0 0 1px rgba(148,163,184,.12)' }}>{children}</button>
+    <button onClick={onClick} style={{ border:'none', borderRadius:999, padding:'10px 14px', fontWeight:800, cursor:'pointer', background: active ? 'linear-gradient(135deg, rgba(99,102,241,.26), rgba(59,130,246,.16))' : 'rgba(255,255,255,.075)', color: active ? '#ffffff' : '#dce7f5', boxShadow: active ? 'inset 0 0 0 1px rgba(129,140,248,.22)' : 'inset 0 0 0 1px rgba(148,163,184,.12)' }}>{children}</button>
   );
 
   return (
