@@ -7,7 +7,13 @@ import {
   dbAddRedemption, dbUpdateRedemptionStatus,
 } from "./supabase.js";
 
-const getTodayISO = () => new Date().toISOString().split("T")[0];
+const getTodayISO = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
 const today = getTodayISO();
 const genId = () => Math.random().toString(36).substr(2, 9);
 const PARENT_PIN_KEY = "familyplanner-parent-pin-v1";
