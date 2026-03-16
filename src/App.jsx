@@ -22,6 +22,19 @@ const CLOUD_SETTINGS_REWARD_ID = "__familyplanner_parent_settings__";
 const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
 const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
 const COMPLETED_HISTORY_DAYS = 14;
+const LIFETIME_COINS_KEY = "familyplanner-lifetime-coins-v1";
+const LEVELS = [
+  { level: 1, name: "Starter", min: 0 },
+  { level: 2, name: "Helper", min: 100 },
+  { level: 3, name: "Doorzetter", min: 250 },
+  { level: 4, name: "Teamspeler", min: 450 },
+  { level: 5, name: "Superheld", min: 700 },
+  { level: 6, name: "Kampioen", min: 1000 },
+  { level: 7, name: "Meester", min: 1350 },
+  { level: 8, name: "Expert", min: 1750 },
+  { level: 9, name: "Legende", min: 2200 },
+  { level: 10, name: "Ultieme Held", min: 2700 },
+];
 
 const getStoredParentPin = () => {
   try {
@@ -46,22 +59,30 @@ const getPenaltyReason = (r) => {
   const title = String(r?.rewardTitle || "");
   return title.replace(/^Ecoins afgepakt\s*[—-]\s*/i, "").trim() || "Geen reden opgegeven";
 };
-async function fetchParentPinFromCloud() {
+async function fetchCloudSettings() {
   const res = await supabase.from("rewards").select("id,title,description").eq("id", CLOUD_SETTINGS_REWARD_ID).maybeSingle();
-  if (res.error) throw new Error(`loadParentPin: ${res.error.message}`);
+  if (res.error) throw new Error(`loadCloudSettings: ${res.error.message}`);
   const raw = res.data?.description || "";
-  if (!raw) return null;
+  if (!raw) return { parentPin: null, lifetimeCoinsMap: {} };
   try {
     const parsed = JSON.parse(raw);
-    return /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null;
+    return {
+      parentPin: /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null,
+      lifetimeCoinsMap: parsed?.lifetimeCoinsMap && typeof parsed.lifetimeCoinsMap === "object" ? parsed.lifetimeCoinsMap : {},
+    };
   } catch {
-    return null;
+    return { parentPin: null, lifetimeCoinsMap: {} };
   }
 }
-async function saveParentPinToCloud(pin) {
-  const payload = { id: CLOUD_SETTINGS_REWARD_ID, title: CLOUD_SETTINGS_TITLE, description: JSON.stringify({ parentPin: pin }), cost: 999999, emoji: "🔐" };
+async function saveCloudSettingsToCloud(patch = {}) {
+  const current = await fetchCloudSettings().catch(() => ({ parentPin: null, lifetimeCoinsMap: {} }));
+  const next = {
+    parentPin: /^\d{6}$/.test(String(patch.parentPin ?? current.parentPin ?? "")) ? String(patch.parentPin ?? current.parentPin) : null,
+    lifetimeCoinsMap: patch.lifetimeCoinsMap && typeof patch.lifetimeCoinsMap === "object" ? patch.lifetimeCoinsMap : (current.lifetimeCoinsMap || {}),
+  };
+  const payload = { id: CLOUD_SETTINGS_REWARD_ID, title: CLOUD_SETTINGS_TITLE, description: JSON.stringify(next), cost: 999999, emoji: "🔐" };
   const res = await supabase.from("rewards").upsert(payload, { onConflict: "id" }).select("id").single();
-  if (res.error) throw new Error(`saveParentPin: ${res.error.message}`);
+  if (res.error) throw new Error(`saveCloudSettings: ${res.error.message}`);
 }
 
 function diffDays(fromDate, toDate) {
@@ -80,6 +101,53 @@ function loadOverdueTrack() {
 
 function saveOverdueTrack(track) {
   localStorage.setItem(OVERDUE_TRACK_KEY, JSON.stringify(track));
+}
+
+function loadLifetimeCoins() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LIFETIME_COINS_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLifetimeCoins(map) {
+  try {
+    localStorage.setItem(LIFETIME_COINS_KEY, JSON.stringify(map || {}));
+  } catch {}
+}
+
+function getChildLifetimeCoinsValue(child, lifetimeMap = {}) {
+  if (!child) return 0;
+  const raw = lifetimeMap?.[child.id];
+  if (Number.isFinite(Number(raw))) return Math.max(0, Number(raw));
+  if (Number.isFinite(Number(child.lifetimeCoins))) return Math.max(0, Number(child.lifetimeCoins));
+  return Math.max(0, Number(child.coins || 0));
+}
+
+function getLevelInfo(totalCoins = 0) {
+  const safeCoins = Math.max(0, Number(totalCoins || 0));
+  let current = LEVELS[0];
+  for (const level of LEVELS) {
+    if (safeCoins >= level.min) current = level;
+    else break;
+  }
+  const idx = LEVELS.findIndex(l => l.level === current.level);
+  const next = LEVELS[idx + 1] || null;
+  const currentMin = current.min;
+  const nextMin = next ? next.min : current.min;
+  const progress = next ? Math.max(0, Math.min(1, (safeCoins - currentMin) / Math.max(1, nextMin - currentMin))) : 1;
+  return {
+    ...current,
+    coins: safeCoins,
+    nextLevel: next?.level || null,
+    nextName: next?.name || null,
+    nextMin,
+    progress,
+    remaining: next ? Math.max(0, next.min - safeCoins) : 0,
+    isMax: !next,
+  };
 }
 
 const TASK_META_OPEN = "[[FPMETA]]";
@@ -1781,6 +1849,105 @@ function FeestOverlay({ childName, onClose }) {
   );
 }
 
+function LevelUpOverlay({ event, onClose }) {
+  if (!event) return null;
+  const style = event.style === "magical"
+    ? {
+        bg: "linear-gradient(135deg,#ff7ac8 0%,#ffa8e8 35%,#c084fc 100%)",
+        glow: "0 0 0 8px rgba(255,255,255,.18), 0 24px 80px rgba(255,122,200,.45)",
+        accent: "#fff7fb",
+        title: "✨ LEVEL UP! ✨",
+        button: "linear-gradient(135deg,#ec4899 0%,#c026d3 100%)",
+        deco: ["✨","🦄","🌈","💖","⭐","🪄"],
+      }
+    : {
+        bg: "linear-gradient(135deg,#0f172a 0%,#1d4ed8 45%,#22c55e 100%)",
+        glow: "0 0 0 8px rgba(255,255,255,.12), 0 24px 80px rgba(37,99,235,.5)",
+        accent: "#eff6ff",
+        title: "🚀 LEVEL UP! 🚀",
+        button: "linear-gradient(135deg,#2563eb 0%,#0ea5e9 100%)",
+        deco: ["⚡","🎮","🏆","🛡️","💥","🚀"],
+      };
+
+  const pieces = Array.from({ length: 70 }, (_, i) => ({
+    id: i,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    left: Math.random() * 100,
+    dur:  1.8 + Math.random() * 1.4,
+    delay: Math.random() * 0.8,
+    x: (Math.random() - 0.5) * 320,
+    rot: Math.random() * 720 - 360,
+    wide: Math.random() > 0.5,
+  }));
+
+  return (
+    <>
+      <div className="feest-confetti">
+        {pieces.map(p => (
+          <div key={p.id} className="confetti-piece" style={{
+            left: `${p.left}%`,
+            background: p.color,
+            width: p.wide ? 14 : 8,
+            borderRadius: p.wide ? "50%" : 3,
+            "--cf-dur": `${p.dur}s`,
+            "--cf-delay": `${p.delay}s`,
+            "--cf-x": `${p.x}px`,
+            "--cf-rot": `${p.rot}deg`,
+          }} />
+        ))}
+      </div>
+      <div className="feest-overlay">
+        <div className="feest-backdrop" />
+        <div className="feest-card" onClick={e => e.stopPropagation()} style={{
+          maxWidth: 520,
+          width: "min(92vw, 520px)",
+          padding: "22px 20px 24px",
+          background: style.bg,
+          color: "white",
+          boxShadow: style.glow,
+          border: "2px solid rgba(255,255,255,.22)",
+          overflow: "hidden",
+        }}>
+          <div style={{ position:"absolute", inset:0, pointerEvents:"none", opacity:.16, fontSize:36, display:"grid", gridTemplateColumns:"repeat(3,1fr)", padding:18 }}>
+            {style.deco.map((d, i) => <div key={i} style={{ textAlign: i % 3 === 1 ? "center" : i % 3 === 2 ? "right" : "left" }}>{d}</div>)}
+          </div>
+          <div style={{ position:"relative" }}>
+            <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 1.2, opacity: .95 }}>{style.title}</div>
+            <div style={{ display:"flex", justifyContent:"center", margin:"16px 0 10px" }}>
+              <div style={{
+                width: 148, height: 148, borderRadius: "50%",
+                background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,.95), rgba(255,255,255,.2) 42%, rgba(255,255,255,.08) 100%)",
+                border: "5px solid rgba(255,255,255,.35)",
+                display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                boxShadow: "inset 0 0 30px rgba(255,255,255,.35), 0 18px 38px rgba(0,0,0,.22)",
+                animation: "levelPulse 1.6s ease-in-out infinite",
+              }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: event.style === "magical" ? "#be185d" : "#1d4ed8", textTransform:"uppercase" }}>Level</div>
+                <div style={{ fontSize: 56, fontWeight: 900, lineHeight: 1, color: event.style === "magical" ? "#be185d" : "#0f172a" }}>{event.level}</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.05, marginTop: 4 }}>{event.childName}</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: style.accent, marginTop: 8 }}>{event.name}</div>
+            <div style={{ fontSize: 15, opacity: .95, marginTop: 12 }}>Je hebt nu <strong>{event.lifetimeCoins}</strong> lifetime coins verdiend.</div>
+            <div style={{ fontSize: 13, opacity: .92, marginTop: 8 }}>{event.isMax ? "🏁 Max level bereikt!" : `Nog ${event.remaining} coins tot level ${event.nextLevel} — ${event.nextName}`}</div>
+            <button className="btn bp" style={{
+              marginTop: 18,
+              minWidth: 190,
+              background: style.button,
+              color: "#fff",
+              border: "none",
+              boxShadow: "0 10px 24px rgba(0,0,0,.24)",
+            }} onClick={onClose}>
+              {event.style === "magical" ? "Yay! Verder ✨" : "Gaaf! Verder 🚀"}
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes levelPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }`} </style>
+    </>
+  );
+}
+
 // ─── APP ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,    setScreen]    = useState("home");
@@ -1796,21 +1963,69 @@ export default function App() {
   const { playTaskDone, playCoinBurst, playAllDone, playSpend, playDrumroll } = useSound();
   const coinTargetRef = useRef(null);
   const [showFeest, setShowFeest] = useState(false);
+  const [levelUpEvent, setLevelUpEvent] = useState(null);
+  const [lifetimeCoinsMap, setLifetimeCoinsMap] = useState({});
   const [pinChild,  setPinChild]  = useState(null);
   const [pinParent, setPinParent] = useState(false);
   const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
 
+  useEffect(() => {
+    saveLifetimeCoins(lifetimeCoinsMap);
+  }, [lifetimeCoinsMap]);
+
+  const getLifetimeCoinsForChild = useCallback((childOrId) => {
+    const child = typeof childOrId === "string" ? data.children.find(c => c.id === childOrId) : childOrId;
+    return getChildLifetimeCoinsValue(child, lifetimeCoinsMap);
+  }, [data.children, lifetimeCoinsMap]);
+
+  const awardCoinsToChild = useCallback(async (childId, earnedCoins) => {
+    const child = data.children.find(c => c.id === childId);
+    const safeEarned = Math.max(0, Number(earnedCoins || 0));
+    if (!child || safeEarned <= 0) return;
+    const currentLifetime = getLifetimeCoinsForChild(child);
+    const nextLifetime = currentLifetime + safeEarned;
+    const oldLevel = getLevelInfo(currentLifetime);
+    const newLevel = getLevelInfo(nextLifetime);
+    await dbUpdateChildCoins(child.id, Number(child.coins || 0) + safeEarned);
+    const nextLifetimeMap = { ...lifetimeCoinsMap, [child.id]: nextLifetime };
+    setLifetimeCoinsMap(nextLifetimeMap);
+    saveLifetimeCoins(nextLifetimeMap);
+    await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap: nextLifetimeMap }).catch(err => console.error("saveLifetimeCoinsToCloud:", err));
+    if (newLevel.level > oldLevel.level) {
+      setLevelUpEvent({
+        childId: child.id,
+        childName: child.name,
+        level: newLevel.level,
+        name: newLevel.name,
+        nextLevel: newLevel.nextLevel,
+        nextName: newLevel.nextName,
+        remaining: newLevel.remaining,
+        isMax: newLevel.isMax,
+        lifetimeCoins: nextLifetime,
+        style: isNevahChild(child) ? "magical" : "game",
+      });
+    }
+  }, [data.children, getLifetimeCoinsForChild, lifetimeCoinsMap, parentPin]);
+
   // ── Laad data uit Supabase bij opstarten ──
   useEffect(() => {
-    Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
-      .then(([dataRes, pinRes]) => {
+    Promise.allSettled([loadAll(), fetchCloudSettings()])
+      .then(([dataRes, settingsRes]) => {
         if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
         else console.error("Laad fout:", dataRes.reason);
-        if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
-          setParentPin(pinRes.value);
-          setStoredParentPin(pinRes.value);
+        const localLifetime = loadLifetimeCoins();
+        if (settingsRes.status === "fulfilled") {
+          const cloudSettings = settingsRes.value || {};
+          if (/^\d{6}$/.test(cloudSettings.parentPin || "")) {
+            setParentPin(cloudSettings.parentPin);
+            setStoredParentPin(cloudSettings.parentPin);
+          } else {
+            setParentPin(getStoredParentPin());
+          }
+          setLifetimeCoinsMap(cloudSettings.lifetimeCoinsMap && Object.keys(cloudSettings.lifetimeCoinsMap).length > 0 ? cloudSettings.lifetimeCoinsMap : localLifetime);
         } else {
           setParentPin(getStoredParentPin());
+          setLifetimeCoinsMap(localLifetime);
         }
         setLoading(false);
       })
@@ -1818,13 +2033,20 @@ export default function App() {
   }, []);
 
   // ── Helper: herlaad alle data na een wijziging ──
-  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchParentPinFromCloud()])
-    .then(([dataRes, pinRes]) => {
+  const reload = useCallback(() => Promise.allSettled([loadAll(), fetchCloudSettings()])
+    .then(([dataRes, settingsRes]) => {
       if (dataRes.status === "fulfilled") setData(stripCloudSettingsFromData(dataRes.value));
       else console.error(dataRes.reason);
-      if (pinRes.status === "fulfilled" && /^\d{6}$/.test(pinRes.value || "")) {
-        setParentPin(pinRes.value);
-        setStoredParentPin(pinRes.value);
+      if (settingsRes.status === "fulfilled") {
+        const cloudSettings = settingsRes.value || {};
+        if (/^\d{6}$/.test(cloudSettings.parentPin || "")) {
+          setParentPin(cloudSettings.parentPin);
+          setStoredParentPin(cloudSettings.parentPin);
+        }
+        if (cloudSettings.lifetimeCoinsMap && typeof cloudSettings.lifetimeCoinsMap === "object") {
+          setLifetimeCoinsMap(cloudSettings.lifetimeCoinsMap);
+          saveLifetimeCoins(cloudSettings.lifetimeCoinsMap);
+        }
       }
     })
     .catch(console.error), []);
@@ -1976,6 +2198,10 @@ export default function App() {
     addChild: async (c) => {
       const id = genId();
       await dbAddChild({ id, coins: 0, ...c });
+      const nextLifetimeMap = { ...lifetimeCoinsMap, [id]: 0 };
+      setLifetimeCoinsMap(nextLifetimeMap);
+      saveLifetimeCoins(nextLifetimeMap);
+      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap: nextLifetimeMap }).catch(err => console.error("saveLifetimeCoinsToCloud:", err));
       reload();
     },
     updateChildPin: async (id, pin) => {
@@ -2012,13 +2238,14 @@ export default function App() {
     },
     updateParentPin: async (pin) => {
       if (!/^\d{6}$/.test(pin || "")) return;
-      await saveParentPinToCloud(pin);
+      await saveCloudSettingsToCloud({ parentPin: pin, lifetimeCoinsMap });
       setStoredParentPin(pin);
       setParentPin(pin);
       reload();
     },
     delChild: async (id) => {
       await dbDelChild(id);
+      setLifetimeCoinsMap(prev => { const next = { ...prev }; delete next[id]; return next; });
       reload();
     },
     addTask: async (t) => {
@@ -2046,7 +2273,7 @@ export default function App() {
       if (!taskInfo.requiresParentApproval) {
         const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: todayNow, approvedOn: todayNow, lockedCoins: earnedCoins });
         await supabase.from('tasks').update({ status: 'approved', description, coins: earnedCoins }).eq('id', id);
-        if (child) await dbUpdateChildCoins(child.id, child.coins + earnedCoins);
+        if (child) await awardCoinsToChild(child.id, earnedCoins);
       } else {
         const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: todayNow, approvedOn: null, lockedCoins: earnedCoins });
         await supabase.from('tasks').update({ status: 'done', description, coins: earnedCoins }).eq('id', id);
@@ -2060,7 +2287,7 @@ export default function App() {
       const description = updateTaskDescMeta(task.desc, task.coins, { approvedOn: getTodayISO(), lockedCoins: approvedCoins });
       await supabase.from('tasks').update({ status: 'approved', description, coins: approvedCoins }).eq('id', id);
       const child = data.children.find(c => c.id === task.childId);
-      if (child) await dbUpdateChildCoins(child.id, child.coins + approvedCoins);
+      if (child) await awardCoinsToChild(child.id, approvedCoins);
       reload();
     },
     reject: async (id) => {
@@ -2157,7 +2384,7 @@ export default function App() {
       <style>{CSS}</style>
       <div className="app">
         {screen === "home" && (
-          <HomeScreen data={data} onSelectKid={openChildScreen} onParent={() => setPinParent(true)} playDrumroll={playDrumroll} />
+          <HomeScreen data={data} onSelectKid={openChildScreen} onParent={() => setPinParent(true)} playDrumroll={playDrumroll} getLifetimeCoinsForChild={getLifetimeCoinsForChild} />
         )}
 
         {screen === "child" && (
@@ -2175,6 +2402,7 @@ export default function App() {
                 playSpend={playSpend}
                 onAllDone={() => { setShowFeest(true); }}
                 coinTargetRef={coinTargetRef}
+                getLifetimeCoinsForChild={getLifetimeCoinsForChild}
               />
             </main>
           </>
@@ -2205,6 +2433,13 @@ export default function App() {
           <FeestOverlay
             childName={activeKidName}
             onClose={() => setShowFeest(false)}
+          />
+        )}
+
+        {levelUpEvent && (
+          <LevelUpOverlay
+            event={levelUpEvent}
+            onClose={() => setLevelUpEvent(null)}
           />
         )}
 
@@ -2509,7 +2744,7 @@ function Thermometer({ children, onReveal, onReset, playDrumroll }) {
 
 
 // ─── HOME SCREEN ───────────────────────────────────────────────────────────────
-function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
+function HomeScreen({ data, onSelectKid, onParent, playDrumroll, getLifetimeCoinsForChild }) {
   const d = new Date();
   const [coinsRevealed, setCoinsRevealed] = useState(false);
   return (
@@ -2548,6 +2783,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
           ));
           const todayDone = homeVisibleTasks.filter(t => t.status !== "pending").length;
           const todayTotal = homeVisibleTasks.length;
+          const levelInfo = getLevelInfo(getLifetimeCoinsForChild(c));
           return (
             <div key={c.id} className="home-kid"
               style={{ border: `3px solid ${th.pri}44` }}
@@ -2565,6 +2801,18 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
                   transition: "filter .5s ease",
                   userSelect: "none",
                 }}>🪙 {c.coins} <span style={{ fontSize:14, color:"var(--t2)", fontWeight:700 }}>coins</span></div>
+                <div style={{ marginTop: 8, background: "#f8fafc", border: `2px solid ${th.pri}22`, borderRadius: 14, padding: "10px 10px 8px" }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6 }}>
+                    <div style={{ fontWeight:900, color: th.priD, fontSize: 14 }}>🏅 Level {levelInfo.level} — {levelInfo.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 800 }}>{levelInfo.coins} lifetime</div>
+                  </div>
+                  <div className="pb" style={{ height: 10, background: `${th.pri}22`, marginBottom: 5 }}>
+                    <div className="pf" style={{ width: `${Math.round(levelInfo.progress * 100)}%`, background: th.hdr }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 700 }}>
+                    {levelInfo.isMax ? "🏁 Max level bereikt" : `Nog ${levelInfo.remaining} coins tot level ${levelInfo.nextLevel}`}
+                  </div>
+                </div>
                 {todayTotal > 0
                   ? <div className="home-kid-tasks">{todayDone}/{todayTotal} taken gedaan vandaag</div>
                   : <div className="home-kid-tasks">Geen taken vandaag 🎉</div>
@@ -2586,7 +2834,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 }
 
 // ─── CHILD VIEW ────────────────────────────────────────────────────────────────
-function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
+function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, getLifetimeCoinsForChild }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
   const activeTasks = dedupeVisibleTasks(data.tasks
@@ -2661,6 +2909,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
 
   if (!cur) return null;
   const th = getChildTheme(cur);
+  const levelInfo = getLevelInfo(getLifetimeCoinsForChild(cur));
 
   return (
     <div style={{ background: th.bg, minHeight: "100vh", margin: "-24px -20px", padding: "24px 20px" }}>
@@ -2695,6 +2944,20 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           <div className={`kh-coins-val ${coinPop ? "pop" : ""}`} style={{ color: "#fff" }}>
             {cur.coins}
           </div>
+        </div>
+      </div>
+
+      <div style={{ background:"#fff", border:`2px solid ${th.pri}33`, boxShadow:`0 8px 24px ${th.pri}12`, borderRadius:20, padding:"14px 16px", marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:8, flexWrap:"wrap" }}>
+          <div style={{ fontWeight:900, fontSize:18, color: th.priD }}>🏅 Level {levelInfo.level} — {levelInfo.name}</div>
+          <div style={{ fontSize:12, color:"var(--t2)", fontWeight:800 }}>{levelInfo.coins} lifetime coins</div>
+        </div>
+        <div className="pb" style={{ height: 14, background: `${th.pri}22`, marginBottom: 8 }}>
+          <div className="pf" style={{ width: `${Math.round(levelInfo.progress * 100)}%`, background: th.hdr }} />
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", gap:10, flexWrap:"wrap", fontSize:12, fontWeight:700, color:"var(--t2)" }}>
+          <span>{levelInfo.isMax ? "🏁 Max level bereikt" : `Nog ${levelInfo.remaining} coins tot level ${levelInfo.nextLevel} — ${levelInfo.nextName}`}</span>
+          <span>{Math.round(levelInfo.progress * 100)}% voortgang</span>
         </div>
       </div>
 
