@@ -1184,18 +1184,45 @@ function useSound() {
     try {
       const ctx = await getCtx();
       if (!ctx) return;
-      [[523.25, 0, 0.12], [659.25, 0.1, 0.12], [783.99, 0.2, 0.12], [1046.5, 0.32, 0.25]].forEach(([freq, delay, dur]) => {
+      const notes = [
+        [659.25, 0.00, 0.10, "triangle", 0.20],
+        [783.99, 0.07, 0.10, "triangle", 0.22],
+        [987.77, 0.15, 0.12, "triangle", 0.24],
+        [1318.51, 0.26, 0.24, "triangle", 0.26],
+      ];
+      notes.forEach(([freq, delay, dur, type, vol]) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
+        const shimmer = ctx.createOscillator();
+        const shimmerGain = ctx.createGain();
         osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = "sine";
-        osc.frequency.value = freq;
+        shimmer.connect(shimmerGain); shimmerGain.connect(ctx.destination);
+        osc.type = type;
+        shimmer.type = "sine";
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+        shimmer.frequency.setValueAtTime(freq * 2, ctx.currentTime + delay);
         const t = ctx.currentTime + delay;
-        gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.3, t + 0.02);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(vol, t + 0.012);
         gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        shimmerGain.gain.setValueAtTime(0.0001, t);
+        shimmerGain.gain.linearRampToValueAtTime(vol * 0.35, t + 0.01);
+        shimmerGain.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.9);
         osc.start(t); osc.stop(t + dur + 0.05);
+        shimmer.start(t); shimmer.stop(t + dur + 0.05);
       });
+      // zachte "whoosh" voor iets meer beloningsgevoel
+      const whoosh = ctx.createOscillator();
+      const whooshGain = ctx.createGain();
+      whoosh.connect(whooshGain); whooshGain.connect(ctx.destination);
+      whoosh.type = "sawtooth";
+      const t0 = ctx.currentTime;
+      whoosh.frequency.setValueAtTime(240, t0);
+      whoosh.frequency.exponentialRampToValueAtTime(620, t0 + 0.16);
+      whooshGain.gain.setValueAtTime(0.0001, t0);
+      whooshGain.gain.linearRampToValueAtTime(0.028, t0 + 0.03);
+      whooshGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.20);
+      whoosh.start(t0); whoosh.stop(t0 + 0.22);
     } catch(e) {}
   }, [getCtx]);
 
@@ -1203,20 +1230,44 @@ function useSound() {
     try {
       const ctx = await getCtx();
       if (!ctx) return;
-      const delay = index * 0.12;
-      // coin clink: short high sine with quick decay
-      const freqs = [1318.5, 1567.98, 1760, 2093];
-      const freq = freqs[index % freqs.length];
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = "triangle";
-      osc.frequency.value = freq;
+      const delay = index * 0.095;
       const t = ctx.currentTime + delay;
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(0.35, t + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-      osc.start(t); osc.stop(t + 0.4);
+      const body = ctx.createOscillator();
+      const bodyGain = ctx.createGain();
+      const ping = ctx.createOscillator();
+      const pingGain = ctx.createGain();
+      const sparkle = ctx.createOscillator();
+      const sparkleGain = ctx.createGain();
+      body.connect(bodyGain); bodyGain.connect(ctx.destination);
+      ping.connect(pingGain); pingGain.connect(ctx.destination);
+      sparkle.connect(sparkleGain); sparkleGain.connect(ctx.destination);
+
+      const baseFreqs = [880, 987.77, 1174.66, 1318.51, 1567.98];
+      const base = baseFreqs[index % baseFreqs.length];
+      body.type = "triangle";
+      ping.type = "sine";
+      sparkle.type = "square";
+      body.frequency.setValueAtTime(base, t);
+      body.frequency.exponentialRampToValueAtTime(base * 0.72, t + 0.18);
+      ping.frequency.setValueAtTime(base * 2.02, t);
+      ping.frequency.exponentialRampToValueAtTime(base * 1.45, t + 0.16);
+      sparkle.frequency.setValueAtTime(base * 3.1, t + 0.02);
+
+      bodyGain.gain.setValueAtTime(0.0001, t);
+      bodyGain.gain.linearRampToValueAtTime(0.16, t + 0.008);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+
+      pingGain.gain.setValueAtTime(0.0001, t);
+      pingGain.gain.linearRampToValueAtTime(0.12, t + 0.006);
+      pingGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+      sparkleGain.gain.setValueAtTime(0.0001, t + 0.02);
+      sparkleGain.gain.linearRampToValueAtTime(0.05, t + 0.03);
+      sparkleGain.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+
+      body.start(t); body.stop(t + 0.24);
+      ping.start(t); ping.stop(t + 0.2);
+      sparkle.start(t + 0.02); sparkle.stop(t + 0.15);
     } catch(e) {}
   }, [getCtx]);
 
@@ -1563,11 +1614,25 @@ const CSS = `
   .et{font-weight:700;font-size:15px}
 
   /* ── FLYING COIN ── */
-  .flying-coin{position:fixed;font-size:28px;pointer-events:none;z-index:9999;animation:flyCoin var(--dur) ease-out forwards}
+  .flying-coin{position:fixed;font-size:30px;pointer-events:none;z-index:9999;animation:flyCoin var(--dur) cubic-bezier(.18,.72,.22,1) forwards;filter:drop-shadow(0 6px 14px rgba(255,190,45,.35))}
+  .flying-coin::before{content:"";position:absolute;left:50%;top:50%;width:18px;height:18px;border-radius:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(255,238,170,.9) 0%, rgba(255,208,64,.3) 45%, rgba(255,208,64,0) 70%);z-index:-1;animation:coinGlow var(--dur) ease-out forwards}
+  .flying-sparkle{position:fixed;pointer-events:none;z-index:9997;font-size:15px;animation:sparkleTrail var(--sdur) ease-out forwards;opacity:.95}
   @keyframes flyCoin{
-    0%  { transform:translate(0,0) scale(1) rotate(0deg);   opacity:1 }
-    60% { transform:translate(var(--tx),var(--ty-mid)) scale(1.3) rotate(180deg); opacity:1 }
-    100%{ transform:translate(var(--tx),var(--ty))    scale(0.4) rotate(360deg); opacity:0 }
+    0%  { transform:translate(0,0) scale(.55) rotate(-18deg);   opacity:0 }
+    10% { opacity:1 }
+    42% { transform:translate(calc(var(--tx) * .45),calc(var(--ty-mid) * .72)) scale(1.28) rotate(140deg); opacity:1 }
+    72% { transform:translate(calc(var(--tx) * .82),calc(var(--ty-mid) * 1.05)) scale(1.08) rotate(260deg); opacity:1 }
+    100%{ transform:translate(var(--tx),var(--ty)) scale(0.32) rotate(430deg); opacity:0 }
+  }
+  @keyframes coinGlow{
+    0%{transform:translate(-50%,-50%) scale(.4);opacity:0}
+    20%{opacity:1}
+    100%{transform:translate(-50%,-50%) scale(1.8);opacity:0}
+  }
+  @keyframes sparkleTrail{
+    0%{transform:translate(0,0) scale(.4) rotate(0deg);opacity:0}
+    18%{opacity:1}
+    100%{transform:translate(var(--stx),var(--sty)) scale(1.1) rotate(180deg);opacity:0}
   }
 
   /* ── COIN BURST OVERLAY ── */
@@ -1707,28 +1772,59 @@ const CSS = `
 // ─── FLYING COINS COMPONENT ────────────────────────────────────────────────────
 function FlyingCoins({ coins, targetRef, onDone }) {
   const [particles, setParticles] = useState([]);
+  const [sparkles, setSparkles] = useState([]);
 
   useEffect(() => {
-    const count = Math.min(Math.max(Math.floor(coins / 3), 4), 10);
+    const count = Math.min(Math.max(Math.floor(coins / 2), 6), 14);
+    const centerX = window.innerWidth * 0.5;
+    const centerY = window.innerHeight * 0.58;
     const newParticles = Array.from({ length: count }, (_, i) => ({
       id: genId(),
-      delay: i * 0.08,
-      dur: 0.8 + Math.random() * 0.4,
-      tx: (Math.random() - 0.5) * 220,
-      tyMid: -(120 + Math.random() * 100),
-      ty: -(200 + Math.random() * 80),
-      startX: window.innerWidth * 0.3 + Math.random() * window.innerWidth * 0.4,
-      startY: window.innerHeight * 0.55 + Math.random() * 80,
+      delay: i * 0.07,
+      dur: 0.95 + Math.random() * 0.45,
+      tx: (Math.random() - 0.5) * 260,
+      tyMid: -(150 + Math.random() * 110),
+      ty: -(250 + Math.random() * 100),
+      startX: centerX + (Math.random() - 0.5) * 180,
+      startY: centerY + Math.random() * 70,
+    }));
+    const sparkleIcons = ["✨","⭐","💫"];
+    const newSparkles = Array.from({ length: count * 2 }, (_, i) => ({
+      id: genId(),
+      icon: sparkleIcons[i % sparkleIcons.length],
+      delay: i * 0.035,
+      dur: 0.55 + Math.random() * 0.35,
+      x: centerX + (Math.random() - 0.5) * 140,
+      y: centerY - 20 + (Math.random() - 0.5) * 90,
+      stx: (Math.random() - 0.5) * 220,
+      sty: -(40 + Math.random() * 170),
     }));
     setParticles(newParticles);
+    setSparkles(newSparkles);
 
-    const maxDur = (count - 1) * 80 + 1200 + 400;
+    const maxDur = (count - 1) * 70 + 1500;
     const timer = setTimeout(onDone, maxDur);
     return () => clearTimeout(timer);
   }, []);
 
   return (
     <>
+      {sparkles.map(s => (
+        <div
+          key={s.id}
+          className="flying-sparkle"
+          style={{
+            left: s.x,
+            top: s.y,
+            "--stx": `${s.stx}px`,
+            "--sty": `${s.sty}px`,
+            "--sdur": `${s.dur}s`,
+            animationDelay: `${s.delay}s`,
+          }}
+        >
+          {s.icon}
+        </div>
+      ))}
       {particles.map(p => (
         <div
           key={p.id}
