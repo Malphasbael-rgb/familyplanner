@@ -3417,34 +3417,43 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
+  const headerPanel = {
+    background: 'linear-gradient(180deg, rgba(12,22,48,0.84), rgba(16,24,39,0.72))',
+    border: '1px solid rgba(148,163,184,0.16)',
+    borderRadius: 24,
+    padding: '18px 20px',
+    boxShadow: '0 24px 60px rgba(2,6,23,.18), inset 0 1px 0 rgba(255,255,255,.04)'
+  };
 
   return (
     <div>
       {tab === "dashboard" ? (
         <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} />
       ) : (
-        <div style={{ marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <h1 style={{ fontFamily: "'Baloo 2',cursive", fontSize: 24, fontWeight: 800, marginBottom: 3 }}>Ouderoverzicht 👨‍👩‍👧</h1>
-            <p style={{ color: "var(--t2)", fontSize: 13 }}>Beheer taken, kinderen en beloningen</p>
-          </div>
-          {(pending.length > 0 || pendingRedemptions.length > 0) && (
-            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-              {pending.length > 0 && (
-                <div style={{ background: "var(--yel-l)", border: "2px solid var(--yel)", borderRadius: 10, padding: "7px 14px", fontWeight: 700, fontSize: 13, color: "#b45309" }}>
-                  ⏳ {pending.length} taak{pending.length > 1 ? "en" : ""} wacht op goedkeuring
-                </div>
-              )}
-              {pendingRedemptions.length > 0 && (
-                <div style={{ background: "#fce7ff", border: "2px solid #d946a8", borderRadius: 10, padding: "7px 14px", fontWeight: 700, fontSize: 13, color: "#a8157c" }}>
-                  🛍️ {pendingRedemptions.length} aankoop{pendingRedemptions.length > 1 ? "en" : ""} wacht op goedkeuring
-                </div>
-              )}
+        <div style={{ ...headerPanel, marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+            <div>
+              <h1 style={{ fontFamily: "'Baloo 2',cursive", fontSize: 30, fontWeight: 800, marginBottom: 4, color:'#eef2ff' }}>Ouderportaal ✨</h1>
+              <p style={{ color: "rgba(226,232,240,0.72)", fontSize: 14 }}>Zelfde rustige dashboardstijl, maar met focus op overzicht en sneller beheren.</p>
             </div>
-          )}
+            {(pending.length > 0 || pendingRedemptions.length > 0) && (
+              <div style={{ display:"flex", flexDirection:"column", gap:8, minWidth:240 }}>
+                {pending.length > 0 && (
+                  <div style={{ background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.24)", borderRadius: 16, padding: "9px 14px", fontWeight: 700, fontSize: 13, color: "#fbbf24" }}>
+                    ⏳ {pending.length} taak{pending.length > 1 ? "en" : ""} wacht op goedkeuring
+                  </div>
+                )}
+                {pendingRedemptions.length > 0 && (
+                  <div style={{ background: "rgba(217,70,168,.12)", border: "1px solid rgba(217,70,168,.22)", borderRadius: 16, padding: "9px 14px", fontWeight: 700, fontSize: 13, color: "#f9a8d4" }}>
+                    🛍️ {pendingRedemptions.length} aankoop{pendingRedemptions.length > 1 ? "en" : ""} wacht op goedkeuring
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
-      <div className="tabs" style={{ marginTop: tab === 'dashboard' ? 18 : 0 }}>
+      <div className="tabs" style={{ marginTop: tab === 'dashboard' ? 18 : 0, background:'rgba(15,23,42,.62)', padding:6, borderRadius:999, border:'1px solid rgba(148,163,184,.14)', width:'100%', overflowX:'auto', flexWrap:'nowrap' }}>
         {[
           ["dashboard", "📊 Dashboard"],
           ["tasks",   "📋 Taken"],
@@ -3454,7 +3463,22 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
           ["purchases", `🛍️ Aankopen${pendingRedemptions.length ? ` (${pendingRedemptions.length})` : ""}`],
           ["settings",  "⚙️ Instellingen"],
         ].map(([k,l]) => (
-          <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{l}</button>
+          <button
+            key={k}
+            className={`tab ${tab === k ? "on" : ""}`}
+            onClick={() => setTab(k)}
+            style={{
+              borderRadius: 999,
+              padding: '12px 18px',
+              border: 'none',
+              whiteSpace:'nowrap',
+              background: tab === k ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'transparent',
+              color: tab === k ? '#eef2ff' : 'rgba(226,232,240,.78)',
+              boxShadow: tab === k ? 'inset 0 0 0 1px rgba(129,140,248,.26), 0 8px 20px rgba(15,23,42,.18)' : 'none',
+              fontWeight: 800,
+              minWidth: 'fit-content'
+            }}
+          >{l}</button>
         ))}
       </div>
       {tab === "tasks"     && <TasksTab     data={data} db={db} setModal={setModal} getChild={getChild} />}
@@ -3471,6 +3495,7 @@ function TasksTab({ data, db, setModal, getChild }) {
   const [filter, setFilter] = useState("all");
   const [showHistory, setShowHistory] = useState(false);
   const todayNow = getTodayISO();
+  const pagePanel = { background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' };
 
   const tasks = [...data.tasks]
     .filter(t => (filter === "all" || t.childId === filter))
@@ -3490,98 +3515,115 @@ function TasksTab({ data, db, setModal, getChild }) {
     });
 
   const statusEl = (s) => {
-    if (s === "template") return <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>🔁 Sjabloon</span>;
-    if (s === "pending") return <span className="bd bbl">Te doen</span>;
-    if (s === "done") return <span className="bd by">⏳ Wacht</span>;
-    return <span className="bd bgn">✅ Klaar</span>;
+    if (s === "template") return <span className="bd" style={{ background: "rgba(139,92,246,.18)", color: "#c4b5fd", border:'1px solid rgba(139,92,246,.22)' }}>🔁 Sjabloon</span>;
+    if (s === "pending") return <span className="bd" style={{ background:'rgba(59,130,246,.18)', color:'#bfdbfe', border:'1px solid rgba(59,130,246,.20)' }}>Te doen</span>;
+    if (s === "done") return <span className="bd" style={{ background:'rgba(245,158,11,.16)', color:'#fcd34d', border:'1px solid rgba(245,158,11,.22)' }}>⏳ Wacht</span>;
+    return <span className="bd" style={{ background:'rgba(34,197,94,.16)', color:'#86efac', border:'1px solid rgba(34,197,94,.22)' }}>✅ Klaar</span>;
   };
 
   const getValidityLabel = (task) => {
     const info = parseTaskDesc(task.desc, task.coins);
     const recurrenceType = getRecurringType(task);
     if (recurrenceType === "daily") return "Geldig op die dag";
-    if (recurrenceType === "weekly" || info.dayPart === "weekly") {
-      if (info.durationDays <= 1) return "1 dag om af te ronden";
-      return `${info.durationDays} dagen om af te ronden`;
-    }
-    if (info.durationDays <= 1) return "1 dag geldig";
-    return `${info.durationDays} dagen geldig`;
+    if (recurrenceType === "weekly" || info.dayPart === "weekly") return `${info.durationDays} ${info.durationDays === 1 ? 'dag' : 'dagen'} om af te ronden`;
+    return `${info.durationDays} ${info.durationDays === 1 ? 'dag' : 'dagen'} geldig`;
   };
 
   const getCoinLabel = (task) => {
     const info = parseTaskDesc(task.desc, task.coins);
-    if (task.status === "template") {
-      return `🪙${info.maxCoins}`;
-    }
-    return `🪙${task.coins}`;
+    return `🪙${task.status === "template" ? info.maxCoins : task.coins}`;
   };
 
+  const FilterChip = ({ active, onClick, children }) => (
+    <button onClick={onClick} style={{ border:'none', borderRadius:999, padding:'10px 14px', fontWeight:800, cursor:'pointer', background: active ? 'linear-gradient(135deg, rgba(99,102,241,.26), rgba(59,130,246,.16))' : 'rgba(255,255,255,.05)', color: active ? '#eef2ff' : 'rgba(226,232,240,.74)', boxShadow: active ? 'inset 0 0 0 1px rgba(129,140,248,.22)' : 'inset 0 0 0 1px rgba(148,163,184,.12)' }}>{children}</button>
+  );
+
   return (
-    <div>
-      <div className="sh">
-        <span className="st">Alle Taken</span>
-        <button className="btn bp" onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
-      </div>
-      <div className="frow">
-        <button className={`btn bsm ${showHistory ? "bp" : "bh"}`} onClick={() => setShowHistory(v => !v)}>{showHistory ? "📚 Verberg geschiedenis" : "📚 Toon geschiedenis"}</button>
-        <button className={`btn bsm ${filter === "all" ? "bp" : "bh"}`} onClick={() => setFilter("all")}>Alle kinderen</button>
-        {data.children.map(c => (
-          <button key={c.id} className={`btn bsm ${filter === c.id ? "bp" : "bh"}`} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
-        ))}
+    <div style={{ marginTop:18, display:'grid', gap:16 }}>
+      <div style={pagePanel}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+          <div>
+            <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Alle Taken</div>
+            <div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Kalmer overzicht met betere filtering en minder visuele ruis.</div>
+          </div>
+          <button className="btn bp" style={{ borderRadius:16, boxShadow:'0 10px 24px rgba(99,102,241,.18)' }} onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
+        </div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          <FilterChip active={showHistory} onClick={() => setShowHistory(v => !v)}>{showHistory ? "📚 Geschiedenis aan" : "📚 Geschiedenis uit"}</FilterChip>
+          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>Alle kinderen</FilterChip>
+          {data.children.map(c => <FilterChip key={c.id} active={filter === c.id} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</FilterChip>)}
+        </div>
       </div>
 
-      {tasks.length === 0
-        ? <div className="emp"><div className="ei">📋</div><div className="et">Geen geplande taken zichtbaar.</div></div>
-        : tasks.map(t => {
+      {tasks.length === 0 ? (
+        <div className="emp" style={{ ...pagePanel }}><div className="ei">📋</div><div className="et">Geen geplande taken zichtbaar.</div></div>
+      ) : (
+        tasks.map(t => {
           const ch = getChild(t.childId);
           const info = parseTaskDesc(t.desc, t.coins);
           const recurrenceType = getRecurringType(t);
           return (
-            <div key={t.id} className="tr">
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</span>{statusEl(t.status)}
+            <div key={t.id} style={{ ...pagePanel, padding:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+              <div style={{ flex: 1, minWidth:220 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 800, fontSize: 16 }}>{t.title}</span>{statusEl(t.status)}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, color: 'rgba(226,232,240,.72)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
                   <span>{getDayPartConfig(info.dayPart).emoji} {getDayPartLabel(info.dayPart)}</span>
                   <span>⏳ {getValidityLabel(t)}</span>
                   <span>{info.requiresParentApproval ? "👨‍👩‍👧 Ouder keurt goed" : "⚡ Direct klaar"}</span>
                   {recurrenceType !== "none" && <span>🔁 {getRecurringLabel(t)}</span>}
-                  {info.visibleDesc && <span>💬 {info.visibleDesc}</span>}
                 </div>
+                {info.visibleDesc && <div style={{ fontSize: 12, color: 'rgba(226,232,240,.58)', marginTop: 6 }}>💬 {info.visibleDesc}</div>}
               </div>
-              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>{getCoinLabel(t)} <span style={{ fontSize: 11, color: "var(--t2)" }}>/ {info.maxCoins}</span></span>
-              {t.status === "pending" ? <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button> : <span style={{ width: 36, textAlign: "center", opacity: 0.45, fontSize: 15 }}>🔒</span>}
+              <div style={{ display:'flex', alignItems:'center', gap:12, marginLeft:'auto' }}>
+                <span style={{ fontWeight: 900, color: '#fcd34d', fontSize: 15, whiteSpace: 'nowrap' }}>{getCoinLabel(t)} <span style={{ fontSize: 11, color: 'rgba(226,232,240,.52)' }}>/ {info.maxCoins}</span></span>
+                {t.status === "pending" ? <button className="btn bh bsm" style={{ color: "var(--red)", borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(248,113,113,.18)' }} onClick={() => db.delTask(t.id)}>🗑</button> : <span style={{ width: 40, textAlign: "center", opacity: 0.45, fontSize: 16 }}>🔒</span>}
+              </div>
             </div>
           );
         })
-      }
+      )}
     </div>
   );
 }
 
 function ApproveTab({ data, db, pending, getChild }) {
+  const panel = { background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' };
   return (
-    <div>
-      <div className="st" style={{ marginBottom: 14 }}>Taken Goedkeuren ✅</div>
+    <div style={{ marginTop:18 }}>
+      <div style={{ ...panel, marginBottom:16 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
+          <div>
+            <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Taken Goedkeuren ✅</div>
+            <div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Rustig overzicht van alles wat nog jouw akkoord nodig heeft.</div>
+          </div>
+          <div style={{ padding:'10px 14px', borderRadius:16, background:'rgba(245,158,11,.10)', border:'1px solid rgba(245,158,11,.22)', color:'#fbbf24', fontWeight:800 }}>{pending.length} open</div>
+        </div>
+      </div>
       {pending.length === 0
-        ? <div className="emp"><div className="ei">🎉</div><div className="et">Niets te goedkeuren!</div></div>
-        : pending.map(t => {
+        ? <div className="emp" style={{ ...panel }}><div className="ei">🎉</div><div className="et">Niets te goedkeuren!</div></div>
+        : <div style={{ display:'grid', gap:14 }}>{pending.map(t => {
           const ch = getChild(t.childId);
+          const info = parseTaskDesc(t.desc, t.coins);
           return (
-            <div key={t.id} className="pi">
-              <div style={{ fontSize: 26 }}>{ch?.avatar || "🧒"}</div>
-              <div style={{ flex: 1, minWidth: 120 }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</div>
-                <div style={{ fontSize: 12, color: "var(--t2)" }}>{ch?.name} · 📅 {t.date} · 🪙 {t.coins}</div>
+            <div key={t.id} style={{ ...panel, padding:16, display:'flex', gap:14, alignItems:'center', flexWrap:'wrap' }}>
+              <div style={{ width:52, height:52, borderRadius:'50%', display:'grid', placeItems:'center', background:'rgba(59,130,246,.12)', fontSize:28 }}>{ch?.avatar || "🧒"}</div>
+              <div style={{ flex:1, minWidth:160 }}>
+                <div style={{ fontWeight:800, fontSize:17, marginBottom:4 }}>{t.title}</div>
+                <div style={{ fontSize:13, color:'rgba(226,232,240,.72)', display:'flex', gap:10, flexWrap:'wrap' }}>
+                  <span>{ch?.name}</span><span>📅 {t.date}</span><span>{getDayPartConfig(info.dayPart).emoji} {getDayPartLabel(info.dayPart)}</span><span>🪙 {t.coins}</span>
+                </div>
               </div>
-              <button className="btn bg bsm" onClick={() => db.approve(t.id)}>✅ Goedkeuren</button>
-              <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.reject(t.id)}>↩ Terug</button>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                <button className="btn bg bsm" style={{ borderRadius:14, boxShadow:'0 10px 24px rgba(16,185,129,.12)' }} onClick={() => db.approve(t.id)}>✅ Goedkeuren</button>
+                <button className="btn bh bsm" style={{ color: "var(--red)", borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(248,113,113,.22)' }} onClick={() => db.reject(t.id)}>↩ Terug</button>
+              </div>
             </div>
           );
-        })
+        })}</div>
       }
     </div>
   );
@@ -3600,13 +3642,10 @@ function KidsTab({ data, db, setModal }) {
 
   return (
     <div>
-      <div className="sh">
-        <span className="st">Kinderen 👶</span>
-        <button className="btn bp" onClick={() => setModal({ type: "child" })}>+ Toevoegen</button>
-      </div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Kinderen 👶</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Beheer pins, coins, levels en correcties zonder rommelig gedoe.</div></div><button className="btn bp" style={{ borderRadius:16, boxShadow:'0 10px 24px rgba(99,102,241,.18)' }} onClick={() => setModal({ type: "child" })}>+ Toevoegen</button></div>
       <div className="g3">
         {data.children.map(c => (
-          <div key={c.id} className="card" style={{ textAlign: "center" }}>
+          <div key={c.id} className="card" style={{ textAlign: "center", background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))', border:'1px solid rgba(148,163,184,.14)', boxShadow:'0 18px 40px rgba(2,6,23,.14)', borderRadius:22, color:'#eef2ff' }}>
             <div style={{ fontSize: 52, marginBottom: 6 }}>{getChildAvatar(c)}</div>
             <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 19, fontWeight: 800 }}>{c.name}</div>
             <div style={{ fontSize: 21, fontWeight: 900, color: "var(--yel)", margin: "7px 0" }}>🪙 {c.coins}</div>
@@ -3669,7 +3708,7 @@ function SettingsTab({ data, db, parentPin }) {
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
   return (
     <div>
-      <div className="sh"><span className="st">Instellingen ⚙️</span></div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Instellingen ⚙️</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
       <div className="g2">
         <div className="card">
           <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🔐 Ouder login</div>
@@ -3694,15 +3733,12 @@ function SettingsTab({ data, db, parentPin }) {
 function RewardsTab({ data, db, setModal }) {
   return (
     <div>
-      <div className="sh">
-        <span className="st">Beloningen 🎁</span>
-        <button className="btn bp" onClick={() => setModal({ type: "reward" })}>+ Beloning</button>
-      </div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Beloningen 🎁</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Rustigere kaarten voor beloningen, met focus op prijs en doelgroep.</div></div><button className="btn bp" style={{ borderRadius:16, boxShadow:'0 10px 24px rgba(99,102,241,.18)' }} onClick={() => setModal({ type: "reward" })}>+ Beloning</button></div>
       <div className="ga">
         {data.rewards.map(r => {
           const rewardMeta = parseRewardDesc(r.desc);
           return (
-          <div key={r.id} className="card" style={{ textAlign: "center" }}>
+          <div key={r.id} className="card" style={{ textAlign: "center", background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))', border:'1px solid rgba(148,163,184,.14)', boxShadow:'0 18px 40px rgba(2,6,23,.14)', borderRadius:22, color:'#eef2ff' }}>
             <div style={{ fontSize: 44, marginBottom: 7 }}>{r.emoji}</div>
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 3 }}>{r.title}</div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 6 }}>{rewardMeta.visibleDesc}</div>
@@ -3738,7 +3774,7 @@ function PurchasesTab({ data, db, getChild }) {
     const ch = getChild(r.childId);
     const penalty = isPenaltyRedemption(r);
     return (
-      <div className="tr" style={{ background: penalty ? "#fff7ed" : r.status === "approved" ? "#f0fdf4" : r.status === "rejected" ? "#fff5f5" : "var(--sur2)", flexWrap:"wrap", gap:8 }}>
+      <div className="tr" style={{ background: penalty ? "rgba(154,52,18,.10)" : r.status === "approved" ? "rgba(34,197,94,.10)" : r.status === "rejected" ? "rgba(248,113,113,.10)" : "linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))", border:"1px solid rgba(148,163,184,.14)", borderRadius:20, flexWrap:"wrap", gap:8, boxShadow:"0 18px 40px rgba(2,6,23,.14)", color:"#eef2ff" }}>
         <div style={{ fontSize:32 }}>{r.rewardEmoji}</div>
         <div style={{ flex:1, minWidth:120 }}>
           <div style={{ fontWeight:800, fontSize:15 }}>{penalty ? "Ecoins afgepakt" : r.rewardTitle}</div>
@@ -3762,7 +3798,7 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div className="sh"><span className="st">Aankopen & straffen 🛍️⚠️</span></div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
 
       {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
