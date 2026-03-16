@@ -95,7 +95,7 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     recurrenceType: ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none",
     isTemplate: !!meta.isTemplate,
     recurrenceSourceId: typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null,
-    dayPart: ["allDay", "morning", "afternoon", "evening"].includes(meta.dayPart) ? meta.dayPart : "allDay",
+    dayPart: ["allDay", "morning", "afternoon", "evening", "weekly"].includes(meta.dayPart) ? meta.dayPart : "allDay",
     requiresParentApproval: Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true,
     lockedCoins: Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null,
   };
@@ -129,7 +129,7 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const recurrenceType = ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none";
   const isTemplate = !!meta.isTemplate;
   const recurrenceSourceId = typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null;
-  const dayPart = ["allDay", "morning", "afternoon", "evening"].includes(meta.dayPart) ? meta.dayPart : "allDay";
+  const dayPart = ["allDay", "morning", "afternoon", "evening", "weekly"].includes(meta.dayPart) ? meta.dayPart : "allDay";
   const requiresParentApproval = Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true;
   const lockedCoins = Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null;
 
@@ -227,6 +227,15 @@ const DAY_PART_OPTIONS = [
   { value: "morning", label: "Ochtend", startHour: 6, emoji: "🌅" },
   { value: "afternoon", label: "Middag", startHour: 12, emoji: "🌞" },
   { value: "evening", label: "Avond", startHour: 18, emoji: "🌙" },
+  { value: "weekly", label: "Weektaak", startHour: 0, emoji: "📅" },
+];
+
+const CHILD_TASK_SECTIONS = [
+  { key: "allDay", title: "Hele dag", empty: "Geen hele-dagtaken", emoji: "🗓️" },
+  { key: "morning", title: "Ochtend", empty: "Geen ochtendtaken", emoji: "🌅" },
+  { key: "afternoon", title: "Middag", empty: "Geen middagtaken", emoji: "🌞" },
+  { key: "evening", title: "Avond", empty: "Geen avondtaken", emoji: "🌙" },
+  { key: "weekly", title: "Weektaken", empty: "Geen weektaken", emoji: "📅" },
 ];
 
 function normalizeDayPart(value) {
@@ -249,9 +258,15 @@ function isTaskVisibleForChildNow(task, now = new Date()) {
   if (!taskDate) return true;
   if (taskDate < nowDate) return true;
   if (taskDate > nowDate) return false;
+  if (info.dayPart === "weekly") return true;
   const config = getDayPartConfig(info.dayPart);
   const currentHour = now.getHours() + (now.getMinutes() / 60);
   return currentHour >= config.startHour;
+}
+
+function getTaskSectionKey(task) {
+  const info = parseTaskDesc(task?.desc, task?.coins);
+  return ["allDay", "morning", "afternoon", "evening", "weekly"].includes(info.dayPart) ? info.dayPart : "allDay";
 }
 
 function buildTaskPayloadFromMeta(baseTask, metaPatch = {}, taskPatch = {}) {
@@ -2518,14 +2533,26 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
 function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
-  const todayTasks = data.tasks.filter(t =>
-    t.childId === activeKid &&
-    !isRecurringTemplateTask(t) &&
-    t.date === todayNow &&
-    getTaskRemainingCoins(t, todayNow) > 0 &&
-    shouldKeepCompletedVisible(t, todayNow) &&
-    (t.status !== "pending" || isTaskVisibleForChildNow(t))
-  );
+  const activeTasks = data.tasks
+    .filter(t =>
+      t.childId === activeKid &&
+      !isRecurringTemplateTask(t) &&
+      t.date <= todayNow &&
+      getTaskRemainingCoins(t, todayNow) > 0 &&
+      shouldKeepCompletedVisible(t, todayNow) &&
+      (t.status !== "pending" || isTaskVisibleForChildNow(t))
+    )
+    .sort((a, b) => {
+      const sectionDiff = CHILD_TASK_SECTIONS.findIndex(s => s.key === getTaskSectionKey(a)) - CHILD_TASK_SECTIONS.findIndex(s => s.key === getTaskSectionKey(b));
+      if (sectionDiff !== 0) return sectionDiff;
+      if (a.status !== b.status) return a.status === "pending" ? -1 : 1;
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.title.localeCompare(b.title, "nl");
+    });
+  const tasksBySection = CHILD_TASK_SECTIONS.reduce((acc, section) => {
+    acc[section.key] = activeTasks.filter(t => getTaskSectionKey(t) === section.key);
+    return acc;
+  }, {});
   const missedTasks = data.tasks
     .filter(t =>
       t.childId === activeKid &&
@@ -2535,9 +2562,9 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
       getTaskRemainingCoins(t, todayNow) > 0
     )
     .sort((a, b) => a.date.localeCompare(b.date));
-  const doneCount = todayTasks.filter(t => t.status !== "pending").length;
-  const prog = todayTasks.length > 0 ? Math.round((doneCount / todayTasks.length) * 100) : 0;
-  const allDone = todayTasks.length > 0 && todayTasks.every(t => t.status !== "pending");
+  const doneCount = activeTasks.filter(t => t.status !== "pending").length;
+  const prog = activeTasks.length > 0 ? Math.round((doneCount / activeTasks.length) * 100) : 0;
+  const allDone = activeTasks.length > 0 && activeTasks.every(t => t.status !== "pending");
 
   const [feitje]  = useState(() => FEITJES[Math.floor(Math.random() * FEITJES.length)]);
   const [coinPop, setCoinPop] = useState(false);
@@ -2649,13 +2676,34 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
 
       {kidTab === "tasks" && (
         <div>
-          <div className="st" style={{ marginBottom: 14, color: th.priD }}>Taken van vandaag {th.taskIcon}</div>
-          {todayTasks.length === 0
-            ? <div className="emp"><div className="ei">🎉</div><div className="et">Geen taken vandaag — vrij!</div></div>
-            : todayTasks.map(t => (
-                <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
-              ))
-          }
+          <div className="st" style={{ marginBottom: 14, color: th.priD }}>Mijn taken per moment {th.taskIcon}</div>
+          {activeTasks.length === 0 ? (
+            <div className="emp"><div className="ei">🎉</div><div className="et">Geen actieve taken op dit moment — vrij spel!</div></div>
+          ) : (
+            <div style={{ display: "grid", gap: 14 }}>
+              {CHILD_TASK_SECTIONS.map(section => {
+                const sectionTasks = tasksBySection[section.key] || [];
+                return (
+                  <div key={section.key} style={{ background: "#ffffffcc", border: `2px solid ${th.pri}22`, borderRadius: 18, padding: 14, boxShadow: `0 4px 14px ${th.pri}10` }}>
+                    <div style={{ fontWeight: 900, fontSize: 15, color: th.priD, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 20 }}>{section.emoji}</span>
+                      <span>{section.title}</span>
+                      <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--t2)" }}>{sectionTasks.length}</span>
+                    </div>
+                    {sectionTasks.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--t2)", padding: "6px 2px" }}>{section.empty}</div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {sectionTasks.map(t => (
+                          <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -2760,6 +2808,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const taskMeta = parseTaskDesc(task.desc, task.coins);
   const daysLeft = getTaskDaysLeft(task, today);
   const dayPartLabel = getDayPartLabel(taskMeta.dayPart);
+  const currentCoins = task.status === "pending" ? getTaskRemainingCoins(task, today) : Math.max(0, Number(task.coins || taskMeta.lockedCoins || 0));
 
   const handleCheck = () => {
     if (done || appr) return;
@@ -2801,7 +2850,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
         {!done && !appr && (
           <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
-            📅 Startdatum {task.date} · {getDayPartConfig(taskMeta.dayPart).emoji} {dayPartLabel} · ⏳ Nog {daysLeft} dag{daysLeft === 1 ? "" : "en"} over
+            📅 Startdatum {task.date} · {getDayPartConfig(taskMeta.dayPart).emoji} {dayPartLabel} · {daysLeft === 1 ? "⚠️ Laatste dag" : `⏳ Nog ${daysLeft} dag${daysLeft === 1 ? "" : "en"} over`}
           </div>
         )}
         {isMissed && !done && !appr && (
@@ -2813,7 +2862,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         {done && taskMeta.requiresParentApproval && <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginTop: 3 }}>⏳ Wacht op goedkeuring van ouder</div>}
         {appr && <div style={{ fontSize: 11, color: th.pri, fontWeight: 700, marginTop: 3 }}>{taskMeta.requiresParentApproval ? "✅ Goedgekeurd! Coins ontvangen!" : "✅ Meteen afgerond! Coins ontvangen!"}</div>}
       </div>
-      <div style={{ fontWeight: 900, color: "var(--yel)", fontSize: 21, display: "flex", alignItems: "center", gap: 3 }}>🪙{task.coins}</div>
+      <div style={{ fontWeight: 900, color: "var(--yel)", fontSize: 21, display: "flex", alignItems: "center", gap: 3 }}>🪙{currentCoins}</div>
     </div>
   );
 }
@@ -3313,7 +3362,7 @@ function AddTaskModal({ close, db, children }) {
             </div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
               <>
-                Start op <strong>{date}</strong> · {getDayPartConfig(dayPart).emoji} zichtbaar vanaf <strong>{getDayPartLabel(dayPart).toLowerCase()}</strong>
+                Start op <strong>{date}</strong> · {getDayPartConfig(dayPart).emoji} {dayPart === "weekly" ? <>zichtbaar als <strong>weektaak</strong> in het weektaken-blok</> : <>zichtbaar vanaf <strong>{getDayPartLabel(dayPart).toLowerCase()}</strong></>}
                 {recurrenceType === "none" ? (
                   <> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
                 ) : (
