@@ -3914,12 +3914,13 @@ function TasksTab({ data, db, setModal, getChild }) {
     .filter(t => (filter === "all" || t.childId === filter))
     .filter((task) => {
       const info = parseTaskDesc(task.desc, task.coins);
+      const effectiveStatus = getEffectiveTaskStatus(task);
       const isGeneratedRecurringTask = !isRecurringTemplateTask(task) && !!info.recurrenceSourceId;
       if (isGeneratedRecurringTask) return false;
       if (task.status === "template") return true;
-      if (task.status === "pending") return true;
+      if (effectiveStatus === "pending") return true;
       if (shouldKeepCompletedVisible(task, todayNow)) return true;
-      if (showHistory && (task.status === "done" || task.status === "approved") && !isTaskOlderThanHistoryWindow(task, todayNow)) return true;
+      if (showHistory && (effectiveStatus === "done" || effectiveStatus === "approved") && !isTaskOlderThanHistoryWindow(task, todayNow)) return true;
       return false;
     })
     .sort((a, b) => {
@@ -3979,7 +3980,7 @@ function TasksTab({ data, db, setModal, getChild }) {
             <div key={t.id} style={{ ...pagePanel, padding:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
               <div style={{ flex: 1, minWidth:220 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 800, fontSize: 16 }}>{t.title}</span>{statusEl(t.status)}
+                  <span style={{ fontWeight: 800, fontSize: 16 }}>{t.title}</span>{statusEl(effectiveStatus)}
                 </div>
                 <div style={{ fontSize: 13, color: 'rgba(226,232,240,.84)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
@@ -3993,7 +3994,7 @@ function TasksTab({ data, db, setModal, getChild }) {
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:12, marginLeft:'auto' }}>
                 <span style={{ fontWeight: 900, color: '#fcd34d', fontSize: 15, whiteSpace: 'nowrap' }}>{getCoinLabel(t)} <span style={{ fontSize: 11, color: 'rgba(226,232,240,.52)' }}>/ {info.maxCoins}</span></span>
-                {t.status === "pending" ? <button className="btn bh bsm" style={{ color: "var(--red)", borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(248,113,113,.18)' }} onClick={() => db.delTask(t.id)}>🗑</button> : <span style={{ width: 40, textAlign: "center", opacity: 0.45, fontSize: 16 }}>🔒</span>}
+                {effectiveStatus === "pending" ? <button className="btn bh bsm" style={{ color: "var(--red)", borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(248,113,113,.18)' }} onClick={() => db.delTask(t.id)}>🗑</button> : <span style={{ width: 40, textAlign: "center", opacity: 0.45, fontSize: 16 }}>🔒</span>}
               </div>
             </div>
           );
