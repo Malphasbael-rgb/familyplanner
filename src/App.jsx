@@ -269,6 +269,49 @@ function getTaskSectionKey(task) {
   return ["allDay", "morning", "afternoon", "evening", "weekly"].includes(info.dayPart) ? info.dayPart : "allDay";
 }
 
+function dedupeVisibleTasks(tasks = []) {
+  const statusRank = { pending: 1, done: 2, approved: 3 };
+  const picked = new Map();
+
+  for (const task of tasks) {
+    const info = parseTaskDesc(task?.desc, task?.coins);
+    const sectionKey = getTaskSectionKey(task);
+
+    const dedupeKey = info.recurrenceSourceId
+      ? [task.childId || "", info.recurrenceSourceId, task.date || "", sectionKey].join("__")
+      : [task.id || "", sectionKey].join("__");
+
+    const current = picked.get(dedupeKey);
+    if (!current) {
+      picked.set(dedupeKey, task);
+      continue;
+    }
+
+    const currentRank = statusRank[current.status] || 0;
+    const nextRank = statusRank[task.status] || 0;
+
+    if (nextRank > currentRank) {
+      picked.set(dedupeKey, task);
+      continue;
+    }
+
+    if (nextRank === currentRank) {
+      const currentCoins = Number(current.coins || 0);
+      const nextCoins = Number(task.coins || 0);
+      if (nextCoins > currentCoins) {
+        picked.set(dedupeKey, task);
+        continue;
+      }
+      if (nextCoins === currentCoins && String(task.id || "") > String(current.id || "")) {
+        picked.set(dedupeKey, task);
+      }
+    }
+  }
+
+  return Array.from(picked.values());
+}
+
+
 function buildTaskPayloadFromMeta(baseTask, metaPatch = {}, taskPatch = {}) {
   const info = parseTaskDesc(baseTask?.desc, baseTask?.coins);
   return {
