@@ -2584,6 +2584,9 @@ export default function App() {
           setLifetimeCoinsMap(cloudSettings.lifetimeCoinsMap);
           saveLifetimeCoins(cloudSettings.lifetimeCoinsMap);
         }
+        setChildBirthDatesMap(cloudSettings.childBirthDatesMap && typeof cloudSettings.childBirthDatesMap === "object" ? cloudSettings.childBirthDatesMap : {});
+        setChildCountdownsMap(cloudSettings.childCountdownsMap && typeof cloudSettings.childCountdownsMap === "object" ? cloudSettings.childCountdownsMap : {});
+        setChildActivitiesMap(cloudSettings.childActivitiesMap && typeof cloudSettings.childActivitiesMap === "object" ? cloudSettings.childActivitiesMap : {});
       }
     })
     .catch(console.error), []);
