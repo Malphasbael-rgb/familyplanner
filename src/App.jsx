@@ -885,7 +885,11 @@ const DEFAULT_THEME = {
   progressColor:"rgba(255,255,255,.9)",
 };
 const getTheme = (name) => THEMES[name] || DEFAULT_THEME;
-const isNevahChild = (child) => child?.id === "c1" || /^(nevah|neoah|neva?h)$/i.test((child?.name || "").trim());
+const normalizeName = (v = "") => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+const isNevahChild = (child) => {
+  const nm = normalizeName(child?.name || "");
+  return child?.id === "c1" || ["nevah","neoah","nevaah","nevha","neva"].includes(nm) || /^neva+h$/.test(nm);
+};
 const getChildTheme = (child) => isNevahChild(child) ? THEMES.Nevah : getTheme(child?.name || "");
 const getChildAvatar = (child) => isNevahChild(child) ? "👸" : (child?.avatar || "🧒");
 
