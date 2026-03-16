@@ -3023,6 +3023,9 @@ export default function App() {
                 onAllDone={() => { setShowFeest(true); }}
                 coinTargetRef={coinTargetRef}
                 getLifetimeCoinsForChild={getLifetimeCoinsForChild}
+                childBirthDatesMap={childBirthDatesMap}
+                childCountdownsMap={childCountdownsMap}
+                childActivitiesMap={childActivitiesMap}
               />
             </main>
           </>
@@ -3035,7 +3038,7 @@ export default function App() {
               <button className="back-btn" onClick={goHome}>← Terug</button>
             </header>
             <main className="main">
-              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} getLifetimeCoinsForChild={getLifetimeCoinsForChild} />
+              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} getLifetimeCoinsForChild={getLifetimeCoinsForChild} childBirthDatesMap={childBirthDatesMap} childCountdownsMap={childCountdownsMap} childActivitiesMap={childActivitiesMap} />
             </main>
           </>
         )}
