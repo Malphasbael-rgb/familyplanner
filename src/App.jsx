@@ -263,6 +263,7 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     requiresParentApproval: Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true,
     lockedCoins: Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null,
     taskEmoji: typeof meta.taskEmoji === "string" ? meta.taskEmoji.trim().slice(0, 8) : "",
+    recurrencePaused: !!meta.recurrencePaused,
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -298,8 +299,9 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const requiresParentApproval = Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true;
   const lockedCoins = Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null;
   const taskEmoji = typeof meta.taskEmoji === "string" ? meta.taskEmoji.trim().slice(0, 8) : "";
+  const recurrencePaused = !!meta.recurrencePaused;
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart, requiresParentApproval, lockedCoins, taskEmoji };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart, requiresParentApproval, lockedCoins, taskEmoji, recurrencePaused };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -316,6 +318,7 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     requiresParentApproval: Object.prototype.hasOwnProperty.call(patch, "requiresParentApproval") ? patch.requiresParentApproval : info.requiresParentApproval,
     lockedCoins: Object.prototype.hasOwnProperty.call(patch, "lockedCoins") ? patch.lockedCoins : info.lockedCoins,
     taskEmoji: Object.prototype.hasOwnProperty.call(patch, "taskEmoji") ? patch.taskEmoji : info.taskEmoji,
+    recurrencePaused: Object.prototype.hasOwnProperty.call(patch, "recurrencePaused") ? !!patch.recurrencePaused : info.recurrencePaused,
   });
 }
 
@@ -398,6 +401,12 @@ function isRecurringTemplateTask(task) {
 function getRecurringType(task) {
   const info = parseTaskDesc(task?.desc, task?.coins);
   return info.recurrenceType || "none";
+}
+
+function isRecurringPaused(task) {
+  if (!task) return false;
+  const info = parseTaskDesc(task.desc, task.coins);
+  return !!info.recurrencePaused;
 }
 
 function getRecurringLabel(task) {
@@ -2693,11 +2702,21 @@ export default function App() {
           return childInfo.recurrenceSourceId === id;
         });
         for (const childTask of generatedChildren) {
-          await dbDelTask(childTask.id);
+          const childStatus = getEffectiveTaskStatus(childTask);
+          if (childStatus === "pending") {
+            await dbDelTask(childTask.id);
+          }
         }
       }
 
       await dbDelTask(id);
+      reload();
+    },
+    toggleRecurringPaused: async (id, paused) => {
+      const task = data.tasks.find(t => t.id === id);
+      if (!task || !isRecurringTemplateTask(task)) return;
+      const description = updateTaskDescMeta(task.desc, task.coins, { recurrencePaused: !!paused });
+      await supabase.from('tasks').update({ description }).eq('id', id);
       reload();
     },
     markDone: async (id) => {
@@ -3916,6 +3935,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoi
         {[
           ["dashboard", "📊 Dashboard"],
           ["tasks",   "📋 Taken"],
+          ["recurring", "🔁 Terugkerend"],
           ["approve", `✅ Goedkeuren${pending.length ? ` (${pending.length})` : ""}`],
           ["kids",    "👶 Kinderen"],
           ["rewards", "🎁 Beloningen"],
@@ -3941,6 +3961,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoi
         ))}
       </div>
       {tab === "tasks"     && <TasksTab     data={data} db={db} setModal={setModal} getChild={getChild} />}
+      {tab === "recurring" && <RecurringTab data={data} db={db} getChild={getChild} />}
       {tab === "approve"   && <ApproveTab   data={data} db={db} pending={pending}   getChild={getChild} />}
       {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
       {tab === "rewards"   && <RewardsTab   data={data} db={db} setModal={setModal} />}
@@ -3963,7 +3984,7 @@ function TasksTab({ data, db, setModal, getChild }) {
       const effectiveStatus = getDisplayTaskStatus(task, data.tasks, todayNow);
       const isGeneratedRecurringTask = !isRecurringTemplateTask(task) && !!info.recurrenceSourceId;
       if (isGeneratedRecurringTask) return false;
-      if (task.status === "template") return true;
+      if (task.status === "template") return false;
       if (effectiveStatus === "pending") return true;
       if (shouldKeepCompletedVisible(task, todayNow)) return true;
       if (showHistory && (effectiveStatus === "done" || effectiveStatus === "approved") && !isTaskOlderThanHistoryWindow(task, todayNow)) return true;
@@ -4004,7 +4025,7 @@ function TasksTab({ data, db, setModal, getChild }) {
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:16 }}>
           <div>
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Alle Taken</div>
-            <div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Kalmer overzicht met betere filtering en minder visuele ruis.</div>
+            <div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Eenmalige en actieve losse taken. Geplande terugkerende taken beheer je in de tab Terugkerend.</div>
           </div>
           <button className="btn bp" style={parentQuietUi.primaryButton()} onClick={() => setModal({ type: "task" })}>+ Nieuwe Taak</button>
         </div>
@@ -4042,6 +4063,115 @@ function TasksTab({ data, db, setModal, getChild }) {
               <div style={{ display:'flex', alignItems:'center', gap:12, marginLeft:'auto' }}>
                 <span style={{ fontWeight: 900, color: '#fcd34d', fontSize: 15, whiteSpace: 'nowrap' }}>{getCoinLabel(t)} <span style={{ fontSize: 11, color: 'rgba(226,232,240,.52)' }}>/ {info.maxCoins}</span></span>
                 {effectiveStatus === "pending" ? <button className="btn bh bsm" style={{ color: "var(--red)", borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(248,113,113,.18)' }} onClick={() => db.delTask(t.id)}>🗑</button> : <span style={{ width: 40, textAlign: "center", opacity: 0.45, fontSize: 16 }}>🔒</span>}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+
+function RecurringTab({ data, db, getChild }) {
+  const [filter, setFilter] = useState("all");
+  const [mode, setMode] = useState("all");
+  const pagePanel = parentQuietUi.header();
+  const templates = [...data.tasks]
+    .filter(isRecurringTemplateTask)
+    .filter(t => filter === "all" || t.childId === filter)
+    .filter(t => {
+      const type = getRecurringType(t);
+      if (mode === "all") return true;
+      if (mode === "active") return !isRecurringPaused(t);
+      if (mode === "paused") return isRecurringPaused(t);
+      return type === mode;
+    })
+    .sort((a, b) => {
+      if ((a.childId || "") !== (b.childId || "")) return String(a.childId || "").localeCompare(String(b.childId || ""));
+      return String(a.title || "").localeCompare(String(b.title || ""));
+    });
+
+  const FilterChip = ({ active, onClick, children }) => (
+    <button onClick={onClick} style={{ border:'none', borderRadius:999, padding:'10px 14px', fontWeight:800, cursor:'pointer', background: active ? 'linear-gradient(135deg, rgba(99,102,241,.26), rgba(59,130,246,.16))' : 'rgba(255,255,255,.075)', color: active ? '#ffffff' : '#dce7f5', boxShadow: active ? 'inset 0 0 0 1px rgba(129,140,248,.22)' : 'inset 0 0 0 1px rgba(148,163,184,.12)' }}>{children}</button>
+  );
+
+  const handleDelete = async (task) => {
+    const childName = getChild(task.childId)?.name || "kind";
+    const ok = window.confirm(`Deze terugkerende planning voor ${childName} wordt verwijderd.\n\nOptie C wordt toegepast:\n- planning verdwijnt\n- open gekoppelde taken verdwijnen ook\n- afgeronde of goedgekeurde taken blijven bestaan\n\nDoorgaan?`);
+    if (!ok) return;
+    await db.delTask(task.id);
+  };
+
+  return (
+    <div style={{ marginTop:18, display:'grid', gap:16 }}>
+      <div style={pagePanel}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+          <div>
+            <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800 }}>Terugkerende Taken</div>
+            <div style={{ color:'rgba(226,232,240,.68)', fontSize:14 }}>Beheer geplande dagelijkse en wekelijkse taken. Pauzeren stopt nieuwe taken. Verwijderen gebruikt optie C.</div>
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:10 }}>
+          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>Alle kinderen</FilterChip>
+          {data.children.map(c => <FilterChip key={c.id} active={filter === c.id} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</FilterChip>)}
+        </div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          <FilterChip active={mode === 'all'} onClick={() => setMode('all')}>Alles</FilterChip>
+          <FilterChip active={mode === 'daily'} onClick={() => setMode('daily')}>Dagelijks</FilterChip>
+          <FilterChip active={mode === 'weekly'} onClick={() => setMode('weekly')}>Wekelijks</FilterChip>
+          <FilterChip active={mode === 'active'} onClick={() => setMode('active')}>Actief</FilterChip>
+          <FilterChip active={mode === 'paused'} onClick={() => setMode('paused')}>Gepauzeerd</FilterChip>
+        </div>
+      </div>
+
+      {templates.length === 0 ? (
+        <div className="emp" style={{ ...pagePanel }}><div className="ei">🔁</div><div className="et">Geen terugkerende taken gevonden.</div></div>
+      ) : (
+        templates.map(t => {
+          const ch = getChild(t.childId);
+          const info = parseTaskDesc(t.desc, t.coins);
+          const paused = isRecurringPaused(t);
+          const linkedOpen = data.tasks.filter(x => {
+            if (!x || isRecurringTemplateTask(x)) return false;
+            const xi = parseTaskDesc(x.desc, x.coins);
+            return xi.recurrenceSourceId === t.id && getEffectiveTaskStatus(x) === "pending";
+          }).length;
+          return (
+            <div key={t.id} style={{ ...pagePanel, padding:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+              <div style={{ flex: 1, minWidth:240 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 800, fontSize: 16 }}>{t.title}</span>
+                  <span className="bd" style={{ background: paused ? 'rgba(148,163,184,.14)' : 'rgba(139,92,246,.18)', color: paused ? '#cbd5e1' : '#c4b5fd', border:`1px solid ${paused ? 'rgba(148,163,184,.24)' : 'rgba(139,92,246,.22)'}` }}>
+                    {paused ? '⏸ Gepauzeerd' : '🔁 Actief'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: 'rgba(226,232,240,.84)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {ch && <span>{ch.avatar} {ch.name}</span>}
+                  <span>{getDayPartConfig(info.dayPart).emoji} {getDayPartLabel(info.dayPart)}</span>
+                  <span>🔁 {getRecurringLabel(t)}</span>
+                  <span>⏳ {getRecurringType(t) === "daily" ? "Geldig op die dag" : `${info.durationDays} ${info.durationDays === 1 ? 'dag' : 'dagen'} om af te ronden`}</span>
+                  <span>{info.requiresParentApproval ? "👨‍👩‍👧 Ouder keurt goed" : "⚡ Direct klaar"}</span>
+                  <span>🪙 {info.maxCoins}</span>
+                  <span>📦 {linkedOpen} open gekoppelde {linkedOpen === 1 ? 'taak' : 'taken'}</span>
+                </div>
+                {info.visibleDesc && <div style={{ fontSize: 12, color: 'rgba(226,232,240,.58)', marginTop: 6 }}>💬 {info.visibleDesc}</div>}
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginLeft:'auto', flexWrap:'wrap' }}>
+                <button
+                  className="btn bh bsm"
+                  style={{ borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(148,163,184,.18)', color:'#e2e8f0' }}
+                  onClick={() => db.toggleRecurringPaused(t.id, !paused)}
+                >
+                  {paused ? '▶️ Hervatten' : '⏸ Pauzeren'}
+                </button>
+                <button
+                  className="btn bh bsm"
+                  style={{ borderRadius:14, background:'rgba(255,255,255,.05)', border:'1px solid rgba(248,113,113,.18)', color:'#fca5a5' }}
+                  onClick={() => handleDelete(t)}
+                >
+                  🗑 Verwijderen
+                </button>
               </div>
             </div>
           );
