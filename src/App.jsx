@@ -344,6 +344,26 @@ function getEffectiveTaskStatus(task) {
   return task.status || "pending";
 }
 
+function getTemplateOccurrenceTask(templateTask, allTasks = [], referenceDate = getTodayISO()) {
+  if (!templateTask || !isRecurringTemplateTask(templateTask)) return null;
+  const occurrenceDate = getRecurringOccurrenceDate(templateTask, referenceDate);
+  if (!occurrenceDate) return null;
+  return allTasks.find((task) => {
+    if (!task || isRecurringTemplateTask(task)) return false;
+    if (task.childId !== templateTask.childId || task.date !== occurrenceDate) return false;
+    const info = parseTaskDesc(task.desc, task.coins);
+    return info.recurrenceSourceId === templateTask.id;
+  }) || null;
+}
+
+function getDisplayTaskStatus(task, allTasks = [], referenceDate = getTodayISO()) {
+  if (!task) return "pending";
+  if (!isRecurringTemplateTask(task)) return getEffectiveTaskStatus(task);
+  const occurrenceTask = getTemplateOccurrenceTask(task, allTasks, referenceDate);
+  if (occurrenceTask) return getEffectiveTaskStatus(occurrenceTask);
+  return "pending";
+}
+
 function shouldKeepCompletedVisible(task, referenceDate = getTodayISO()) {
   if (!task) return false;
   const info = parseTaskDesc(task.desc, task.coins);
@@ -3925,7 +3945,7 @@ function TasksTab({ data, db, setModal, getChild }) {
     .filter(t => (filter === "all" || t.childId === filter))
     .filter((task) => {
       const info = parseTaskDesc(task.desc, task.coins);
-      const effectiveStatus = getEffectiveTaskStatus(task);
+      const effectiveStatus = getDisplayTaskStatus(task, data.tasks, todayNow);
       const isGeneratedRecurringTask = !isRecurringTemplateTask(task) && !!info.recurrenceSourceId;
       if (isGeneratedRecurringTask) return false;
       if (task.status === "template") return true;
@@ -3987,7 +4007,7 @@ function TasksTab({ data, db, setModal, getChild }) {
           const ch = getChild(t.childId);
           const info = parseTaskDesc(t.desc, t.coins);
           const recurrenceType = getRecurringType(t);
-          const effectiveStatus = getEffectiveTaskStatus(t);
+          const effectiveStatus = getDisplayTaskStatus(t, data.tasks, todayNow);
           return (
             <div key={t.id} style={{ ...pagePanel, padding:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
               <div style={{ flex: 1, minWidth:220 }}>
