@@ -2174,6 +2174,35 @@ export default function App() {
     if (!loading) cleanupOldCompletedTasks().catch(err => console.error("Opschonen oude afgeronde taken mislukt:", err));
   }, [loading, data.tasks, cleanupOldCompletedTasks]);
 
+  const cleanupOrphanedRecurringTasks = useCallback(async () => {
+    if (loading || !data.tasks?.length) return;
+
+    const templateIds = new Set(
+      data.tasks
+        .filter(task => isRecurringTemplateTask(task) && getRecurringType(task) !== "none")
+        .map(task => task.id)
+    );
+
+    const orphaned = data.tasks.filter(task => {
+      if (isRecurringTemplateTask(task)) return false;
+      const info = parseTaskDesc(task.desc, task.coins);
+      return !!info.recurrenceSourceId && !templateIds.has(info.recurrenceSourceId);
+    });
+
+    if (!orphaned.length) return;
+
+    for (const task of orphaned) {
+      await dbDelTask(task.id);
+    }
+
+    reload();
+  }, [data.tasks, loading, reload]);
+
+  useEffect(() => {
+    if (!loading) cleanupOrphanedRecurringTasks().catch(err => console.error("Opschonen losse taken zonder sjabloon mislukt:", err));
+  }, [loading, data.tasks, cleanupOrphanedRecurringTasks]);
+
+
   useEffect(() => {
     const channel = supabase
       .channel('familyplanner-sync')
@@ -2265,6 +2294,21 @@ export default function App() {
       reload();
     },
     delTask: async (id) => {
+      const task = data.tasks.find(t => t.id === id);
+      if (!task) return;
+
+      const info = parseTaskDesc(task.desc, task.coins);
+      if (isRecurringTemplateTask(task)) {
+        const generatedChildren = data.tasks.filter(t => {
+          if (t.id === id || isRecurringTemplateTask(t)) return false;
+          const childInfo = parseTaskDesc(t.desc, t.coins);
+          return childInfo.recurrenceSourceId === id;
+        });
+        for (const childTask of generatedChildren) {
+          await dbDelTask(childTask.id);
+        }
+      }
+
       await dbDelTask(id);
       reload();
     },
