@@ -3987,6 +3987,7 @@ function TasksTab({ data, db, setModal, getChild }) {
           const ch = getChild(t.childId);
           const info = parseTaskDesc(t.desc, t.coins);
           const recurrenceType = getRecurringType(t);
+          const effectiveStatus = getEffectiveTaskStatus(t);
           return (
             <div key={t.id} style={{ ...pagePanel, padding:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
               <div style={{ flex: 1, minWidth:220 }}>
