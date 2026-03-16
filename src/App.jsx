@@ -1818,6 +1818,8 @@ export default function App() {
           doneOn: null,
           approvedOn: null,
           lockedCoins: null,
+          durationDays: templateInfo.recurrenceType === "daily" ? 1 : templateInfo.durationDays,
+          dayPart: templateInfo.recurrenceType === "weekly" ? "weekly" : templateInfo.dayPart,
         }, {
           status: "pending",
           date: occurrenceDate,
@@ -2624,9 +2626,9 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginBottom: 8, color: "#fff" }}>
               {th.greeting}, {cur.name}! 👋
             </div>
-            {activeTasks.length > 0 && (
+            {todayTasks.length > 0 && (
               <div style={{ minWidth: 200 }}>
-                <div style={{ fontSize: 13, opacity: .9, marginBottom: 4, color: "#fff" }}>{doneCount} van {activeTasks.length} taken gedaan</div>
+                <div style={{ fontSize: 13, opacity: .9, marginBottom: 4, color: "#fff" }}>{doneCount} van {todayTasks.length} taken gedaan</div>
                 <div className="pb" style={{ background: "rgba(255,255,255,.25)" }}>
                   <div className="pf" style={{ width: `${prog}%`, background: th.progressColor }} />
                 </div>
@@ -3262,6 +3264,24 @@ function AddTaskModal({ close, db, children }) {
   const [recurrenceType, setRecurrenceType] = useState("none");
   const [requiresParentApproval, setRequiresParentApproval] = useState(true);
   const BOTH_CHILDREN_VALUE = "__all_children__";
+  const isDailyTemplate = recurrenceType === "daily";
+  const isWeeklyTemplate = recurrenceType === "weekly";
+  const effectiveDurationDays = isDailyTemplate ? 1 : Math.max(1, Number(durationDays) || 1);
+  const effectiveDayPart = isWeeklyTemplate ? "weekly" : (dayPart === "weekly" ? "allDay" : dayPart);
+
+  useEffect(() => {
+    if (isDailyTemplate && durationDays !== 1) setDurationDays(1);
+  }, [isDailyTemplate, durationDays]);
+
+  useEffect(() => {
+    if (isWeeklyTemplate && dayPart !== "weekly") {
+      setDayPart("weekly");
+      return;
+    }
+    if (!isWeeklyTemplate && dayPart === "weekly") {
+      setDayPart("allDay");
+    }
+  }, [isWeeklyTemplate, dayPart]);
 
   const go = async () => {
     if (!title.trim() || !childId) return;
@@ -3270,11 +3290,11 @@ function AddTaskModal({ close, db, children }) {
       title: title.trim(),
       desc: encodeTaskDesc(desc, {
         maxCoins: +coins,
-        durationDays: +durationDays,
+        durationDays: effectiveDurationDays,
         recurrenceType,
         isTemplate: recurrenceType !== "none",
         recurrenceSourceId: null,
-        dayPart,
+        dayPart: effectiveDayPart,
         requiresParentApproval,
         lockedCoins: null,
       }),
@@ -3322,9 +3342,12 @@ function AddTaskModal({ close, db, children }) {
             </div>
             <div className="fr">
               <div className="fg"><label className="fl">Dagdeel</label>
-                <select className="fs" value={dayPart} onChange={e => setDayPart(normalizeDayPart(e.target.value))}>
-                  {DAY_PART_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.emoji} {option.label}</option>)}
+                <select className="fs" value={effectiveDayPart} onChange={e => setDayPart(normalizeDayPart(e.target.value))} disabled={isWeeklyTemplate}>
+                  {DAY_PART_OPTIONS.filter(option => isWeeklyTemplate ? option.value === "weekly" : option.value !== "weekly").map(option => <option key={option.value} value={option.value}>{option.emoji} {option.label}</option>)}
                 </select>
+                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
+                  {isWeeklyTemplate ? "Wekelijkse taken komen altijd in het blok Weektaken." : "Kies wanneer het kind deze taak op de dag ziet."}
+                </div>
               </div>
               <div className="fg"><label className="fl">Herhaling</label>
                 <select className="fs" value={recurrenceType} onChange={e => setRecurrenceType(e.target.value)}>
@@ -3335,9 +3358,6 @@ function AddTaskModal({ close, db, children }) {
               </div>
             </div>
             <div className="fr">
-              <div className="fg"><label className="fl">Beschikbaar in dagen</label>
-                <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
-              </div>
               <div className="fg">
                 <label className="fl">Goedkeuring nodig</label>
                 <select className="fs" value={requiresParentApproval ? "yes" : "no"} onChange={e => setRequiresParentApproval(e.target.value === "yes")}>
@@ -3345,16 +3365,28 @@ function AddTaskModal({ close, db, children }) {
                   <option value="no">Nee, direct definitief</option>
                 </select>
               </div>
+              {!isDailyTemplate ? (
+                <div className="fg"><label className="fl">Beschikbaar in dagen</label>
+                  <input className="fi" type="number" min="1" max="14" value={effectiveDurationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
+                </div>
+              ) : (
+                <div className="fg">
+                  <label className="fl">Beschikbaar in dagen</label>
+                  <div className="fi" style={{ display: "flex", alignItems: "center", color: "var(--t2)", background: "var(--bg2)" }}>Dagelijkse taken zijn altijd alleen geldig op die dag.</div>
+                </div>
+              )}
             </div>
-            <div className="fg">
-              <label className="fl">⏳ Aantal dagen beschikbaar: <strong>{durationDays}</strong></label>
-              <input type="range" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}>
-                <span>1 dag</span>
-                <span>{Math.floor(coins / Math.max(1, durationDays))} coin verval per gemiste dag{coins % Math.max(1, durationDays) !== 0 ? ` · laatste dag ${coins - (Math.floor(coins / Math.max(1, durationDays)) * (Math.max(1, durationDays) - 1))}` : ""}</span>
-                <span>14 dagen</span>
+            {!isDailyTemplate && (
+              <div className="fg">
+                <label className="fl">⏳ Aantal dagen beschikbaar: <strong>{effectiveDurationDays}</strong></label>
+                <input type="range" min="1" max="14" value={effectiveDurationDays} onChange={e => setDurationDays(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}>
+                  <span>1 dag</span>
+                  <span>{Math.floor(coins / Math.max(1, effectiveDurationDays))} coin verval per gemiste dag{coins % Math.max(1, effectiveDurationDays) !== 0 ? ` · laatste dag ${coins - (Math.floor(coins / Math.max(1, effectiveDurationDays)) * (Math.max(1, effectiveDurationDays) - 1))}` : ""}</span>
+                  <span>14 dagen</span>
+                </div>
               </div>
-            </div>
+            )}
             <div className="fg">
               <label className="fl">🪙 Maximaal te verdienen coins: <strong>{coins}</strong></label>
               <input type="range" min="1" max="50" value={coins} onChange={e => setCoins(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--pri)", cursor: "pointer" }} />
@@ -3362,11 +3394,13 @@ function AddTaskModal({ close, db, children }) {
             </div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
               <>
-                Start op <strong>{date}</strong> · {getDayPartConfig(dayPart).emoji} {dayPart === "weekly" ? <>zichtbaar als <strong>weektaak</strong> in het weektaken-blok</> : <>zichtbaar vanaf <strong>{getDayPartLabel(dayPart).toLowerCase()}</strong></>}
+                Start op <strong>{date}</strong> · {getDayPartConfig(effectiveDayPart).emoji} {effectiveDayPart === "weekly" ? <>zichtbaar als <strong>weektaak</strong> in het weektaken-blok</> : <>zichtbaar vanaf <strong>{getDayPartLabel(effectiveDayPart).toLowerCase()}</strong></>}
                 {recurrenceType === "none" ? (
-                  <> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
+                  <> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, effectiveDurationDays - 1)}</strong> dag{Number(effectiveDurationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
+                ) : recurrenceType === "daily" ? (
+                  <> · dit wordt opgeslagen als <strong>dagelijks sjabloon</strong> en maakt alleen op die dag een losse taak aan. Dagelijkse taken zijn altijd maar <strong>1 dag</strong> geldig.</>
                 ) : (
-                  <> · dit wordt opgeslagen als <strong>{recurrenceType === "daily" ? "dagelijks sjabloon" : "wekelijks sjabloon"}</strong> dat automatisch een losse taak maakt zodra dat moment begint.</>
+                  <> · dit wordt opgeslagen als <strong>wekelijks sjabloon</strong> en maakt per week één losse <strong>weektaak</strong> aan met een looptijd van <strong>{effectiveDurationDays}</strong> dag{effectiveDurationDays === 1 ? "" : "en"}.</>
                 )}
                 {!requiresParentApproval && <> · kind krijgt de coins direct bij afvinken.</>}
               </>
