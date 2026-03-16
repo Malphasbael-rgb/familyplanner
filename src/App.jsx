@@ -95,6 +95,9 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     recurrenceType: ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none",
     isTemplate: !!meta.isTemplate,
     recurrenceSourceId: typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null,
+    dayPart: ["allDay", "morning", "afternoon", "evening"].includes(meta.dayPart) ? meta.dayPart : "allDay",
+    requiresParentApproval: Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true,
+    lockedCoins: Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null,
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -126,8 +129,11 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const recurrenceType = ["daily", "weekly"].includes(meta.recurrenceType) ? meta.recurrenceType : "none";
   const isTemplate = !!meta.isTemplate;
   const recurrenceSourceId = typeof meta.recurrenceSourceId === "string" ? meta.recurrenceSourceId : null;
+  const dayPart = ["allDay", "morning", "afternoon", "evening"].includes(meta.dayPart) ? meta.dayPart : "allDay";
+  const requiresParentApproval = Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true;
+  const lockedCoins = Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null;
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart, requiresParentApproval, lockedCoins };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -140,6 +146,9 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     recurrenceType: Object.prototype.hasOwnProperty.call(patch, "recurrenceType") ? patch.recurrenceType : info.recurrenceType,
     isTemplate: Object.prototype.hasOwnProperty.call(patch, "isTemplate") ? patch.isTemplate : info.isTemplate,
     recurrenceSourceId: Object.prototype.hasOwnProperty.call(patch, "recurrenceSourceId") ? patch.recurrenceSourceId : info.recurrenceSourceId,
+    dayPart: Object.prototype.hasOwnProperty.call(patch, "dayPart") ? patch.dayPart : info.dayPart,
+    requiresParentApproval: Object.prototype.hasOwnProperty.call(patch, "requiresParentApproval") ? patch.requiresParentApproval : info.requiresParentApproval,
+    lockedCoins: Object.prototype.hasOwnProperty.call(patch, "lockedCoins") ? patch.lockedCoins : info.lockedCoins,
   });
 }
 
@@ -210,6 +219,62 @@ function getRecurringOccurrenceDate(templateTask, referenceDate = getTodayISO())
     return daysBetween >= 0 && daysBetween % 7 === 0 ? referenceDate : null;
   }
   return null;
+}
+
+
+const DAY_PART_OPTIONS = [
+  { value: "allDay", label: "Hele dag", startHour: 0, emoji: "🗓️" },
+  { value: "morning", label: "Ochtend", startHour: 6, emoji: "🌅" },
+  { value: "afternoon", label: "Middag", startHour: 12, emoji: "🌞" },
+  { value: "evening", label: "Avond", startHour: 18, emoji: "🌙" },
+];
+
+function normalizeDayPart(value) {
+  return DAY_PART_OPTIONS.some((item) => item.value === value) ? value : "allDay";
+}
+
+function getDayPartConfig(dayPart = "allDay") {
+  return DAY_PART_OPTIONS.find((item) => item.value === normalizeDayPart(dayPart)) || DAY_PART_OPTIONS[0];
+}
+
+function getDayPartLabel(dayPart = "allDay") {
+  return getDayPartConfig(dayPart).label;
+}
+
+function isTaskVisibleForChildNow(task, now = new Date()) {
+  if (!task || task.status !== "pending") return true;
+  const info = parseTaskDesc(task.desc, task.coins);
+  const taskDate = task?.date || "";
+  const nowDate = getTodayISO();
+  if (!taskDate) return true;
+  if (taskDate < nowDate) return true;
+  if (taskDate > nowDate) return false;
+  const config = getDayPartConfig(info.dayPart);
+  const currentHour = now.getHours() + (now.getMinutes() / 60);
+  return currentHour >= config.startHour;
+}
+
+function buildTaskPayloadFromMeta(baseTask, metaPatch = {}, taskPatch = {}) {
+  const info = parseTaskDesc(baseTask?.desc, baseTask?.coins);
+  return {
+    title: baseTask.title,
+    desc: encodeTaskDesc(info.visibleDesc, {
+      maxCoins: Object.prototype.hasOwnProperty.call(metaPatch, "maxCoins") ? metaPatch.maxCoins : info.maxCoins,
+      durationDays: Object.prototype.hasOwnProperty.call(metaPatch, "durationDays") ? metaPatch.durationDays : info.durationDays,
+      doneOn: Object.prototype.hasOwnProperty.call(metaPatch, "doneOn") ? metaPatch.doneOn : null,
+      approvedOn: Object.prototype.hasOwnProperty.call(metaPatch, "approvedOn") ? metaPatch.approvedOn : null,
+      recurrenceType: Object.prototype.hasOwnProperty.call(metaPatch, "recurrenceType") ? metaPatch.recurrenceType : info.recurrenceType,
+      isTemplate: Object.prototype.hasOwnProperty.call(metaPatch, "isTemplate") ? metaPatch.isTemplate : info.isTemplate,
+      recurrenceSourceId: Object.prototype.hasOwnProperty.call(metaPatch, "recurrenceSourceId") ? metaPatch.recurrenceSourceId : info.recurrenceSourceId,
+      dayPart: Object.prototype.hasOwnProperty.call(metaPatch, "dayPart") ? metaPatch.dayPart : info.dayPart,
+      requiresParentApproval: Object.prototype.hasOwnProperty.call(metaPatch, "requiresParentApproval") ? metaPatch.requiresParentApproval : info.requiresParentApproval,
+      lockedCoins: Object.prototype.hasOwnProperty.call(metaPatch, "lockedCoins") ? metaPatch.lockedCoins : null,
+    }),
+    coins: Object.prototype.hasOwnProperty.call(taskPatch, "coins") ? taskPatch.coins : info.maxCoins,
+    date: Object.prototype.hasOwnProperty.call(taskPatch, "date") ? taskPatch.date : baseTask.date,
+    childId: Object.prototype.hasOwnProperty.call(taskPatch, "childId") ? taskPatch.childId : baseTask.childId,
+    status: Object.prototype.hasOwnProperty.call(taskPatch, "status") ? taskPatch.status : baseTask.status,
+  };
 }
 
 const REWARD_META_OPEN = "[[FPREWARD]]";
@@ -1707,9 +1772,52 @@ export default function App() {
     .catch(console.error), []);
 
   const processRecurringTemplates = useCallback(async () => {
-    // Terugkerende taken zijn verwijderd uit deze basisversie.
-    return;
-  }, []);
+    if (loading || !data.tasks?.length) return;
+
+    const referenceDate = getTodayISO();
+    const templateTasks = data.tasks.filter((task) => isRecurringTemplateTask(task) && getRecurringType(task) !== "none");
+    if (!templateTasks.length) return;
+
+    const inserts = [];
+
+    for (const templateTask of templateTasks) {
+      const occurrenceDate = getRecurringOccurrenceDate(templateTask, referenceDate);
+      if (!occurrenceDate) continue;
+
+      const templateInfo = parseTaskDesc(templateTask.desc, templateTask.coins);
+      const exists = data.tasks.some((task) => {
+        if (isRecurringTemplateTask(task)) return false;
+        if (task.childId !== templateTask.childId || task.date !== occurrenceDate) return false;
+        const info = parseTaskDesc(task.desc, task.coins);
+        return info.recurrenceSourceId === templateTask.id;
+      });
+
+      if (exists) continue;
+
+      inserts.push({
+        id: genId(),
+        ...buildTaskPayloadFromMeta(templateTask, {
+          recurrenceType: "none",
+          isTemplate: false,
+          recurrenceSourceId: templateTask.id,
+          doneOn: null,
+          approvedOn: null,
+          lockedCoins: null,
+        }, {
+          status: "pending",
+          date: occurrenceDate,
+          coins: templateInfo.maxCoins,
+        }),
+      });
+    }
+
+    if (!inserts.length) return;
+
+    for (const task of inserts) {
+      await dbAddTask(task);
+    }
+    reload();
+  }, [data.tasks, loading, reload]);
 
   // ── Verwerk gemiste taken: coins vervallen op basis van max coins ÷ duur ──
   const processMissedTasks = useCallback(async () => {
@@ -1719,7 +1827,7 @@ export default function App() {
     const referenceDate = getTodayISO();
 
     for (const task of data.tasks) {
-      if (task.status !== "pending" || !task.date || task.date >= referenceDate) continue;
+      if (task.status !== "pending" || isRecurringTemplateTask(task) || !task.date || task.date >= referenceDate) continue;
 
       const nextCoins = getTaskRemainingCoins(task, referenceDate);
 
@@ -1757,17 +1865,8 @@ export default function App() {
 
   // ── Maak waar nodig losse taken aan uit terugkerende sjablonen ──
   useEffect(() => {
-    if (loading || !data.tasks?.length) return;
-    const recurringTasks = data.tasks.filter((task) => {
-      const info = parseTaskDesc(task.desc, task.coins);
-      return task.status === 'template' || info.isTemplate || info.recurrenceType !== 'none' || !!info.recurrenceSourceId;
-    });
-    if (!recurringTasks.length) return;
-
-    Promise.all(recurringTasks.map((task) => dbDelTask(task.id)))
-      .then(() => reload())
-      .catch(err => console.error('Oude terugkerende taken opruimen mislukt:', err));
-  }, [loading, data.tasks, reload]);
+    if (!loading) processRecurringTemplates().catch(err => console.error('Terugkerende taken genereren mislukt:', err));
+  }, [loading, data.tasks, processRecurringTemplates]);
 
   // ── Realtime: luister naar wijzigingen in de database ──
   // Zodra een ander apparaat iets wijzigt, wordt de data hier automatisch bijgewerkt
@@ -1871,24 +1970,42 @@ export default function App() {
     markDone: async (id) => {
       const task = data.tasks.find(t => t.id === id);
       if (!task) return;
-      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: getTodayISO(), approvedOn: null });
-      await supabase.from('tasks').update({ status: 'done', description }).eq('id', id);
+      const todayNow = getTodayISO();
+      const taskInfo = parseTaskDesc(task.desc, task.coins);
+      const earnedCoins = Math.max(0, getTaskRemainingCoins(task, todayNow));
+      if (earnedCoins <= 0) {
+        await dbDelTask(id);
+        reload();
+        return;
+      }
+
+      const child = data.children.find(c => c.id === task.childId);
+      if (!taskInfo.requiresParentApproval) {
+        const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: todayNow, approvedOn: todayNow, lockedCoins: earnedCoins });
+        await supabase.from('tasks').update({ status: 'approved', description, coins: earnedCoins }).eq('id', id);
+        if (child) await dbUpdateChildCoins(child.id, child.coins + earnedCoins);
+      } else {
+        const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: todayNow, approvedOn: null, lockedCoins: earnedCoins });
+        await supabase.from('tasks').update({ status: 'done', description, coins: earnedCoins }).eq('id', id);
+      }
       reload();
     },
     approve: async (id) => {
       const task = data.tasks.find(t => t.id === id);
       if (!task) return;
-      const description = updateTaskDescMeta(task.desc, task.coins, { approvedOn: getTodayISO() });
-      await supabase.from('tasks').update({ status: 'approved', description }).eq('id', id);
+      const approvedCoins = Math.max(0, Number(task.coins || 0));
+      const description = updateTaskDescMeta(task.desc, task.coins, { approvedOn: getTodayISO(), lockedCoins: approvedCoins });
+      await supabase.from('tasks').update({ status: 'approved', description, coins: approvedCoins }).eq('id', id);
       const child = data.children.find(c => c.id === task.childId);
-      if (child) await dbUpdateChildCoins(child.id, child.coins + task.coins);
+      if (child) await dbUpdateChildCoins(child.id, child.coins + approvedCoins);
       reload();
     },
     reject: async (id) => {
       const task = data.tasks.find(t => t.id === id);
       if (!task) return;
-      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: null, approvedOn: null });
-      await supabase.from('tasks').update({ status: 'pending', description }).eq('id', id);
+      const currentCoins = Math.max(0, getTaskRemainingCoins(task, getTodayISO()));
+      const description = updateTaskDescMeta(task.desc, task.coins, { doneOn: null, approvedOn: null, lockedCoins: null });
+      await supabase.from('tasks').update({ status: 'pending', description, coins: currentCoins || task.coins }).eq('id', id);
       reload();
     },
     addReward: async (r) => {
@@ -2358,8 +2475,8 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll }) {
       <div className="home-kids">
         {data.children.map(c => {
           const th = getChildTheme(c);
-          const todayDone = data.tasks.filter(t => t.childId === c.id && t.date === today && t.status !== "pending").length;
-          const todayTotal = data.tasks.filter(t => t.childId === c.id && t.date === today).length;
+          const todayDone = data.tasks.filter(t => t.childId === c.id && !isRecurringTemplateTask(t) && t.date === today && t.status !== "pending").length;
+          const todayTotal = data.tasks.filter(t => t.childId === c.id && !isRecurringTemplateTask(t) && t.date === today && (t.status !== "pending" || isTaskVisibleForChildNow(t))).length;
           return (
             <div key={c.id} className="home-kid"
               style={{ border: `3px solid ${th.pri}44` }}
@@ -2403,13 +2520,16 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const todayNow = getTodayISO();
   const todayTasks = data.tasks.filter(t =>
     t.childId === activeKid &&
+    !isRecurringTemplateTask(t) &&
     t.date === todayNow &&
     getTaskRemainingCoins(t, todayNow) > 0 &&
-    shouldKeepCompletedVisible(t, todayNow)
+    shouldKeepCompletedVisible(t, todayNow) &&
+    (t.status !== "pending" || isTaskVisibleForChildNow(t))
   );
   const missedTasks = data.tasks
     .filter(t =>
       t.childId === activeKid &&
+      !isRecurringTemplateTask(t) &&
       t.status === "pending" &&
       t.date < todayNow &&
       getTaskRemainingCoins(t, todayNow) > 0
@@ -2639,6 +2759,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const isNevah = /^(névah|nevah|neoah|neva?h)$/i.test((childName || "").trim());
   const taskMeta = parseTaskDesc(task.desc, task.coins);
   const daysLeft = getTaskDaysLeft(task, today);
+  const dayPartLabel = getDayPartLabel(taskMeta.dayPart);
 
   const handleCheck = () => {
     if (done || appr) return;
@@ -2680,7 +2801,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
         {!done && !appr && (
           <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
-            📅 Startdatum {task.date} · ⏳ Nog {daysLeft} dag{daysLeft === 1 ? "" : "en"} over
+            📅 Startdatum {task.date} · {getDayPartConfig(taskMeta.dayPart).emoji} {dayPartLabel} · ⏳ Nog {daysLeft} dag{daysLeft === 1 ? "" : "en"} over
           </div>
         )}
         {isMissed && !done && !appr && (
@@ -2689,8 +2810,8 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
             {taskMeta.lastDecay !== taskMeta.baseDecay ? ` · laatste verval ${taskMeta.lastDecay}` : ""}
           </div>
         )}
-        {done && <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginTop: 3 }}>⏳ Wacht op goedkeuring van ouder</div>}
-        {appr && <div style={{ fontSize: 11, color: th.pri, fontWeight: 700, marginTop: 3 }}>✅ Goedgekeurd! Coins ontvangen!</div>}
+        {done && taskMeta.requiresParentApproval && <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginTop: 3 }}>⏳ Wacht op goedkeuring van ouder</div>}
+        {appr && <div style={{ fontSize: 11, color: th.pri, fontWeight: 700, marginTop: 3 }}>{taskMeta.requiresParentApproval ? "✅ Goedgekeurd! Coins ontvangen!" : "✅ Meteen afgerond! Coins ontvangen!"}</div>}
       </div>
       <div style={{ fontWeight: 900, color: "var(--yel)", fontSize: 21, display: "flex", alignItems: "center", gap: 3 }}>🪙{task.coins}</div>
     </div>
@@ -2755,6 +2876,7 @@ function TasksTab({ data, db, setModal, getChild }) {
     .filter(t => (
       (filter === "all" || t.childId === filter) &&
       (
+        t.status === "template" ||
         t.status === "pending" ||
         shouldKeepCompletedVisible(t, todayNow) ||
         (showHistory && (t.status === "done" || t.status === "approved") && !isTaskOlderThanHistoryWindow(t, todayNow))
@@ -2762,6 +2884,7 @@ function TasksTab({ data, db, setModal, getChild }) {
     ))
     .sort((a,b) => a.date.localeCompare(b.date));
   const statusEl = (s) => {
+    if (s === "template") return <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>🔁 Sjabloon</span>;
     if (s === "pending") return <span className="bd bbl">Te doen</span>;
     if (s === "done") return <span className="bd by">⏳ Wacht</span>;
     return <span className="bd bgn">✅ Klaar</span>;
@@ -2794,6 +2917,9 @@ function TasksTab({ data, db, setModal, getChild }) {
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
+                  <span>{getDayPartConfig(parseTaskDesc(t.desc, t.coins).dayPart).emoji} {getDayPartLabel(parseTaskDesc(t.desc, t.coins).dayPart)}</span>
+                  <span>{parseTaskDesc(t.desc, t.coins).requiresParentApproval ? "👨‍👩‍👧 Ouder keurt goed" : "⚡ Direct klaar"}</span>
+                  {getRecurringType(t) !== "none" && <span>🔁 {getRecurringLabel(t)}</span>}
                   {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
                 </div>
               </div>
@@ -3083,6 +3209,9 @@ function AddTaskModal({ close, db, children }) {
   const [coins, setCoins] = useState(10);
   const [date, setDate] = useState(today);
   const [durationDays, setDurationDays] = useState(3);
+  const [dayPart, setDayPart] = useState("allDay");
+  const [recurrenceType, setRecurrenceType] = useState("none");
+  const [requiresParentApproval, setRequiresParentApproval] = useState(true);
   const BOTH_CHILDREN_VALUE = "__all_children__";
 
   const go = async () => {
@@ -3093,11 +3222,17 @@ function AddTaskModal({ close, db, children }) {
       desc: encodeTaskDesc(desc, {
         maxCoins: +coins,
         durationDays: +durationDays,
+        recurrenceType,
+        isTemplate: recurrenceType !== "none",
+        recurrenceSourceId: null,
+        dayPart,
+        requiresParentApproval,
+        lockedCoins: null,
       }),
       coins: +coins,
       date,
       childId: targetChildId,
-      status: "pending",
+      status: recurrenceType !== "none" ? "template" : "pending",
     });
 
     if (childId === BOTH_CHILDREN_VALUE) {
@@ -3137,8 +3272,29 @@ function AddTaskModal({ close, db, children }) {
               </div>
             </div>
             <div className="fr">
+              <div className="fg"><label className="fl">Dagdeel</label>
+                <select className="fs" value={dayPart} onChange={e => setDayPart(normalizeDayPart(e.target.value))}>
+                  {DAY_PART_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.emoji} {option.label}</option>)}
+                </select>
+              </div>
+              <div className="fg"><label className="fl">Herhaling</label>
+                <select className="fs" value={recurrenceType} onChange={e => setRecurrenceType(e.target.value)}>
+                  <option value="none">Eenmalig</option>
+                  <option value="daily">Dagelijks</option>
+                  <option value="weekly">Wekelijks</option>
+                </select>
+              </div>
+            </div>
+            <div className="fr">
               <div className="fg"><label className="fl">Beschikbaar in dagen</label>
                 <input className="fi" type="number" min="1" max="14" value={durationDays} onChange={e => setDurationDays(Math.max(1, Math.min(14, Number(e.target.value) || 1)))} />
+              </div>
+              <div className="fg">
+                <label className="fl">Goedkeuring nodig</label>
+                <select className="fs" value={requiresParentApproval ? "yes" : "no"} onChange={e => setRequiresParentApproval(e.target.value === "yes")}>
+                  <option value="yes">Ja, ouder moet goedkeuren</option>
+                  <option value="no">Nee, direct definitief</option>
+                </select>
               </div>
             </div>
             <div className="fg">
@@ -3156,7 +3312,15 @@ function AddTaskModal({ close, db, children }) {
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t2)" }}><span>1</span><span>50</span></div>
             </div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
-              <>Start op <strong>{date}</strong> · zichtbaar vanaf de startdag · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
+              <>
+                Start op <strong>{date}</strong> · {getDayPartConfig(dayPart).emoji} zichtbaar vanaf <strong>{getDayPartLabel(dayPart).toLowerCase()}</strong>
+                {recurrenceType === "none" ? (
+                  <> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, durationDays - 1)}</strong> dag{Number(durationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
+                ) : (
+                  <> · dit wordt opgeslagen als <strong>{recurrenceType === "daily" ? "dagelijks sjabloon" : "wekelijks sjabloon"}</strong> dat automatisch een losse taak maakt zodra dat moment begint.</>
+                )}
+                {!requiresParentApproval && <> · kind krijgt de coins direct bij afvinken.</>}
+              </>
             </div>
           </>
         )}
