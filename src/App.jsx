@@ -3635,30 +3635,40 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
 function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild }) {
   const todayNow = getTodayISO();
   const now = new Date();
-  const pendingApprovals = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions = data.redemptions.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
 
   const softBg = "radial-gradient(circle at top left, #18233f 0%, #11182e 42%, #0c1225 100%)";
   const shell = { background: softBg, border: '1px solid rgba(125,156,255,0.18)', borderRadius: 28, padding: 20, boxShadow: '0 28px 60px rgba(6,12,30,0.45)', color: '#eef2ff' };
   const panel = { background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.025))', border: '1px solid rgba(148,163,184,0.18)', borderRadius: 24, boxShadow: '0 12px 30px rgba(0,0,0,0.18)' };
 
-  const visibleOpenTasksForChild = (childId) => dedupeVisibleTasks(
+  const visibleActiveTasksForChild = (childId) => dedupeVisibleTasks(
     data.tasks.filter(t => {
       if (t.childId !== childId) return false;
       if (isRecurringTemplateTask(t)) return false;
-      if (t.status !== 'pending') return false;
+      if (t.date > todayNow) return false;
       if (getTaskRemainingCoins(t, todayNow) <= 0) return false;
       if (!shouldKeepCompletedVisible(t, todayNow)) return false;
       return isTaskVisibleForChildNow(t, now);
     })
   );
 
-  const approvedThisWeekForChild = (childId) => data.tasks.filter(t => {
-    if (t.childId !== childId || t.status !== 'approved') return false;
+  const visibleOpenTasksForChild = (childId) => visibleActiveTasksForChild(childId)
+    .filter(t => getEffectiveTaskStatus(t) === 'pending');
+
+  const pendingApprovals = dedupeVisibleTasks(
+    data.tasks.filter(t => {
+      if (isRecurringTemplateTask(t)) return false;
+      return getEffectiveTaskStatus(t) === 'done' && shouldKeepCompletedVisible(t, todayNow);
+    })
+  );
+
+  const approvedThisWeekForChild = (childId) => dedupeVisibleTasks(data.tasks.filter(t => {
+    if (t.childId !== childId || isRecurringTemplateTask(t)) return false;
+    if (getEffectiveTaskStatus(t) !== 'approved') return false;
     const info = parseTaskDesc(t.desc, t.coins);
     const anchor = info.approvedOn || info.doneOn || t.date;
     return diffDays(anchor, todayNow) <= 6;
-  });
+  }));
 
   const nearlyExpiredWeekly = dedupeVisibleTasks(
     data.tasks.filter(t => {
@@ -3687,15 +3697,16 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
   const childCards = data.children.map((child, idx) => {
     const life = getLifetimeCoinsForChild(child.id);
     const level = getLevelInfo(life);
-    const openTasks = visibleOpenTasksForChild(child.id);
-    const approvals = pendingApprovals.filter(t => t.childId === child.id).length;
+    const activeTasks = visibleActiveTasksForChild(child.id);
+    const openTasks = activeTasks.filter(t => getEffectiveTaskStatus(t) === 'pending');
+    const approvals = activeTasks.filter(t => getEffectiveTaskStatus(t) === 'done').length;
     const weeklyDone = approvedThisWeekForChild(child.id);
     const weeklyCoins = weeklyDone.reduce((sum,t)=> sum + Number(t.coins || 0), 0);
     const theme = idx % 2 === 0
       ? { glow:'rgba(56,189,248,0.34)', border:'rgba(59,130,246,0.45)', accent:'#60a5fa', accent2:'#93c5fd', badgeBg:'rgba(59,130,246,0.14)' }
       : { glow:'rgba(244,114,182,0.30)', border:'rgba(236,72,153,0.42)', accent:'#f472b6', accent2:'#f9a8d4', badgeBg:'rgba(236,72,153,0.13)' };
     const progressWidth = `${Math.max(8, Math.round(level.progress * 100))}%`;
-    return { child, life, level, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth };
+    return { child, life, level, activeTasks, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth };
   });
 
   const attentionItems = [];
@@ -3844,10 +3855,10 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
         <div style={{ ...panel, padding:18 }}>
           <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:18, fontWeight:800, marginBottom:14 }}>📌 Vandaag gepland</div>
           <div style={{ display:'grid', gap:12 }}>
-            {childCards.map(({ child, openTasks }) => (
+            {childCards.map(({ child, activeTasks, openTasks }) => (
               <button key={`planned-${child.id}`} onClick={()=>setTab('tasks')} style={{ textAlign:'left', padding:'15px 16px', borderRadius:18, border:'1px solid rgba(148,163,184,0.16)', background:'rgba(15,23,42,0.44)', color:'#eef2ff', display:'flex', justifyContent:'space-between', alignItems:'center', gap:14 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}><span style={{ fontSize:26 }}>{getChildAvatar(child)}</span><div><div style={{ fontWeight:800 }}>{child.name}</div><div style={{ fontSize:13, color:'rgba(226,232,240,0.68)' }}>{openTasks.length} actieve taken zichtbaar</div></div></div>
-                <div style={{ fontWeight:900, color:'#c7d2fe' }}>{openTasks.length}</div>
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}><span style={{ fontSize:26 }}>{getChildAvatar(child)}</span><div><div style={{ fontWeight:800 }}>{child.name}</div><div style={{ fontSize:13, color:'rgba(226,232,240,0.68)' }}>{activeTasks.length} taken zichtbaar</div></div></div>
+                <div style={{ fontWeight:900, color:'#c7d2fe' }}>{activeTasks.length}</div>
               </button>
             ))}
           </div>
