@@ -2626,9 +2626,9 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginBottom: 8, color: "#fff" }}>
               {th.greeting}, {cur.name}! 👋
             </div>
-            {todayTasks.length > 0 && (
+            {activeTasks.length > 0 && (
               <div style={{ minWidth: 200 }}>
-                <div style={{ fontSize: 13, opacity: .9, marginBottom: 4, color: "#fff" }}>{doneCount} van {todayTasks.length} taken gedaan</div>
+                <div style={{ fontSize: 13, opacity: .9, marginBottom: 4, color: "#fff" }}>{doneCount} van {activeTasks.length} taken gedaan</div>
                 <div className="pb" style={{ background: "rgba(255,255,255,.25)" }}>
                   <div className="pf" style={{ width: `${prog}%`, background: th.progressColor }} />
                 </div>
