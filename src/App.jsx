@@ -333,6 +333,17 @@ function isTaskOlderThanHistoryWindow(task, referenceDate = getTodayISO()) {
   return diffDays(anchorDate, referenceDate) >= COMPLETED_HISTORY_DAYS;
 }
 
+
+function getEffectiveTaskStatus(task) {
+  if (!task) return "pending";
+  const info = parseTaskDesc(task.desc, task.coins);
+  if (task.status === "approved" || info.approvedOn) return "approved";
+  if (task.status === "done" || info.doneOn) {
+    return info.requiresParentApproval === false ? "approved" : "done";
+  }
+  return task.status || "pending";
+}
+
 function shouldKeepCompletedVisible(task, referenceDate = getTodayISO()) {
   if (!task) return false;
   const info = parseTaskDesc(task.desc, task.coins);
