@@ -166,6 +166,7 @@ function encodeTaskDesc(visibleDesc, meta = {}) {
     dayPart: ["allDay", "morning", "afternoon", "evening", "weekly"].includes(meta.dayPart) ? meta.dayPart : "allDay",
     requiresParentApproval: Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true,
     lockedCoins: Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null,
+    taskEmoji: typeof meta.taskEmoji === "string" ? meta.taskEmoji.trim().slice(0, 8) : "",
   };
   const metaBlock = `${TASK_META_OPEN}${JSON.stringify(payload)}${TASK_META_CLOSE}`;
   return cleanDesc ? `${cleanDesc}${metaBlock}` : metaBlock;
@@ -200,8 +201,9 @@ function parseTaskDesc(rawDesc = "", fallbackCoins = 1) {
   const dayPart = ["allDay", "morning", "afternoon", "evening", "weekly"].includes(meta.dayPart) ? meta.dayPart : "allDay";
   const requiresParentApproval = Object.prototype.hasOwnProperty.call(meta, "requiresParentApproval") ? !!meta.requiresParentApproval : true;
   const lockedCoins = Number.isFinite(Number(meta.lockedCoins)) ? Math.max(0, Number(meta.lockedCoins)) : null;
+  const taskEmoji = typeof meta.taskEmoji === "string" ? meta.taskEmoji.trim().slice(0, 8) : "";
 
-  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart, requiresParentApproval, lockedCoins };
+  return { visibleDesc, maxCoins, durationDays, baseDecay, lastDecay, doneOn, approvedOn, recurrenceType, isTemplate, recurrenceSourceId, dayPart, requiresParentApproval, lockedCoins, taskEmoji };
 }
 
 function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
@@ -217,6 +219,7 @@ function updateTaskDescMeta(rawDesc = "", fallbackCoins = 1, patch = {}) {
     dayPart: Object.prototype.hasOwnProperty.call(patch, "dayPart") ? patch.dayPart : info.dayPart,
     requiresParentApproval: Object.prototype.hasOwnProperty.call(patch, "requiresParentApproval") ? patch.requiresParentApproval : info.requiresParentApproval,
     lockedCoins: Object.prototype.hasOwnProperty.call(patch, "lockedCoins") ? patch.lockedCoins : info.lockedCoins,
+    taskEmoji: Object.prototype.hasOwnProperty.call(patch, "taskEmoji") ? patch.taskEmoji : info.taskEmoji,
   });
 }
 
@@ -395,6 +398,7 @@ function buildTaskPayloadFromMeta(baseTask, metaPatch = {}, taskPatch = {}) {
       dayPart: Object.prototype.hasOwnProperty.call(metaPatch, "dayPart") ? metaPatch.dayPart : info.dayPart,
       requiresParentApproval: Object.prototype.hasOwnProperty.call(metaPatch, "requiresParentApproval") ? metaPatch.requiresParentApproval : info.requiresParentApproval,
       lockedCoins: Object.prototype.hasOwnProperty.call(metaPatch, "lockedCoins") ? metaPatch.lockedCoins : null,
+      taskEmoji: Object.prototype.hasOwnProperty.call(metaPatch, "taskEmoji") ? metaPatch.taskEmoji : info.taskEmoji,
     }),
     coins: Object.prototype.hasOwnProperty.call(taskPatch, "coins") ? taskPatch.coins : info.maxCoins,
     date: Object.prototype.hasOwnProperty.call(taskPatch, "date") ? taskPatch.date : baseTask.date,
@@ -986,6 +990,26 @@ function searchEmojis(query) {
   // always show some emojis even with no match
   if (scored.length === 0) return ALL_EMOJIS.slice(0, 30);
   return scored.map(x => x.e);
+}
+
+function getAutoTaskEmoji(title = "", desc = "", dayPart = "allDay") {
+  const query = `${title} ${desc}`.trim();
+  const matches = searchEmojis(query);
+  if (matches.length && query) return matches[0];
+  const fallbackByDayPart = {
+    morning: "🌅",
+    afternoon: "🌞",
+    evening: "🌙",
+    weekly: "📅",
+    allDay: "✨",
+  };
+  return fallbackByDayPart[normalizeDayPart(dayPart)] || "✨";
+}
+
+function getTaskDisplayEmoji(task) {
+  const info = parseTaskDesc(task?.desc, task?.coins);
+  if (info.taskEmoji) return info.taskEmoji;
+  return getAutoTaskEmoji(task?.title || "", info.visibleDesc || "", info.dayPart || "allDay");
 }
 
 const FEITJES = [
@@ -3340,6 +3364,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
   const th = theme || DEFAULT_THEME;
   const isNevah = /^(névah|nevah|neoah|neva?h)$/i.test((childName || "").trim());
   const taskMeta = parseTaskDesc(task.desc, task.coins);
+  const taskEmoji = getTaskDisplayEmoji(task);
   const daysLeft = getTaskDaysLeft(task, today);
   const dayPartLabel = getDayPartLabel(taskMeta.dayPart);
   const currentCoins = task.status === "pending" ? getTaskRemainingCoins(task, today) : Math.max(0, Number(task.coins || taskMeta.lockedCoins || 0));
@@ -3380,7 +3405,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         {(done || appr) ? "✓" : ""}
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340" }}>{task.title}</div>
+        <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340", display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 20, lineHeight: 1 }}>{taskEmoji}</span><span>{task.title}</span></div>
         {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
         {!done && !appr && (
           <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
@@ -4092,6 +4117,8 @@ function AddTaskModal({ close, db, children }) {
   const [dayPart, setDayPart] = useState("allDay");
   const [recurrenceType, setRecurrenceType] = useState("none");
   const [requiresParentApproval, setRequiresParentApproval] = useState(true);
+  const [manualEmoji, setManualEmoji] = useState("");
+  const [emojiQuery, setEmojiQuery] = useState("");
   const BOTH_CHILDREN_VALUE = "__all_children__";
   const isDailyTemplate = recurrenceType === "daily";
   const isWeeklyTemplate = recurrenceType === "weekly";
@@ -4112,6 +4139,15 @@ function AddTaskModal({ close, db, children }) {
     }
   }, [isWeeklyTemplate, dayPart]);
 
+  const autoEmoji = getAutoTaskEmoji(title, desc, effectiveDayPart);
+  const emojiSuggestions = Array.from(new Set([
+    autoEmoji,
+    ...searchEmojis(`${title} ${desc} ${emojiQuery}`),
+    ...ALL_EMOJIS.slice(0, 12),
+  ])).slice(0, 24);
+  const selectedEmoji = (manualEmoji || "").trim();
+  const effectiveTaskEmoji = selectedEmoji || autoEmoji;
+
   const go = async () => {
     if (!title.trim() || !childId) return;
 
@@ -4126,6 +4162,7 @@ function AddTaskModal({ close, db, children }) {
         dayPart: effectiveDayPart,
         requiresParentApproval,
         lockedCoins: null,
+        taskEmoji: selectedEmoji,
       }),
       coins: +coins,
       date,
@@ -4154,6 +4191,41 @@ function AddTaskModal({ close, db, children }) {
             </div>
             <div className="fg"><label className="fl">Omschrijving (optioneel)</label>
               <textarea className="ft" value={desc} onChange={e => setDesc(e.target.value)} placeholder="Extra uitleg..." />
+            </div>
+            <div className="fg">
+              <label className="fl">Emoji bij de taak (optioneel)</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div className="fi" style={{ width: 74, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 800 }} title={selectedEmoji ? "Handmatig gekozen emoji" : "Automatisch gekozen emoji"}>{effectiveTaskEmoji}</div>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <input className="fi" value={emojiQuery} onChange={e => setEmojiQuery(e.target.value)} placeholder="Zoek emoji, bv. tanden, lezen, opruimen" />
+                  <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>
+                    Automatisch gekozen: <strong>{autoEmoji}</strong>{selectedEmoji ? <> · handmatige keuze actief: <strong>{selectedEmoji}</strong></> : <> · geen handmatige keuze, dus deze wordt gebruikt</>}
+                  </div>
+                </div>
+                <button type="button" className="btn bh" onClick={() => setManualEmoji("")} disabled={!selectedEmoji}>Automatisch</button>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                {emojiSuggestions.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setManualEmoji(emoji)}
+                    title={`Gebruik ${emoji} voor deze taak`}
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: 14,
+                      border: manualEmoji === emoji ? "2px solid var(--pri)" : "1px solid var(--line)",
+                      background: manualEmoji === emoji ? "color-mix(in srgb, var(--pri) 14%, white)" : "#fff",
+                      cursor: "pointer",
+                      fontSize: 22,
+                      boxShadow: manualEmoji === emoji ? "0 6px 16px rgba(99,102,241,0.18)" : "none",
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="fr">
               <div className="fg"><label className="fl">Kind</label>
@@ -4223,7 +4295,7 @@ function AddTaskModal({ close, db, children }) {
             </div>
             <div style={{ fontSize: 12, color: "var(--t2)", marginTop: -4 }}>
               <>
-                Start op <strong>{date}</strong> · {getDayPartConfig(effectiveDayPart).emoji} {effectiveDayPart === "weekly" ? <>zichtbaar als <strong>weektaak</strong> in het weektaken-blok</> : <>zichtbaar vanaf <strong>{getDayPartLabel(effectiveDayPart).toLowerCase()}</strong></>}
+                Start op <strong>{date}</strong> · emoji <strong>{effectiveTaskEmoji}</strong> · {getDayPartConfig(effectiveDayPart).emoji} {effectiveDayPart === "weekly" ? <>zichtbaar als <strong>weektaak</strong> in het weektaken-blok</> : <>zichtbaar vanaf <strong>{getDayPartLabel(effectiveDayPart).toLowerCase()}</strong></>}
                 {recurrenceType === "none" ? (
                   <> · geldig op de startdag en de daaropvolgende <strong>{Math.max(0, effectiveDurationDays - 1)}</strong> dag{Number(effectiveDurationDays) === 1 ? "" : "en"} · op de dag daarna kan hij op 0 komen en verdwijnen.</>
                 ) : recurrenceType === "daily" ? (
