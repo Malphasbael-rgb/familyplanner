@@ -4025,22 +4025,22 @@ function SettingsTab({ data, db, parentPin }) {
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
   return (
     <div>
-      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.80), rgba(15,23,42,.64))', border:'1px solid rgba(148,163,184,.16)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#f8fbff' }}>Instellingen ⚙️</div><div style={{ color:'rgba(241,245,249,.88)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#eef2ff' }}>Instellingen ⚙️</div><div style={{ color:'rgba(226,232,240,.82)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
       <div className="g2">
-        <div className="card dark-form">
-          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🔐 Ouder login</div>
+        <div className="card dark-form" style={{ background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))', border:'1px solid rgba(148,163,184,.14)', boxShadow:'0 18px 40px rgba(2,6,23,.14)', color:'#eef2ff' }}>
+          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10, color:'#eef2ff' }}>🔐 Ouder login</div>
           <div className="fg">
             <label className="fl">Oudercode (6 cijfers)</label>
             <input className="fi" inputMode="numeric" maxLength={6} value={pinDraft} onChange={e => setPinDraft(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="258000" />
           </div>
-          <div style={{ fontSize: 12, color: 'rgba(226,232,240,.86)', marginBottom: 12 }}>Deze oudercode wordt via Supabase gedeeld tussen apparaten.</div>
+          <div style={{ fontSize: 12, color: 'rgba(226,232,240,.9)', marginBottom: 12 }}>Deze oudercode wordt via Supabase gedeeld tussen apparaten.</div>
           <button className="btn bp" onClick={() => db.updateParentPin(pinDraft)} disabled={!/^\d{6}$/.test(pinDraft)}>6-cijferige code opslaan</button>
         </div>
-        <div className="card dark-form">
-          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10 }}>🪙 Coins beheren</div>
-          <div style={{ fontSize: 13, color: 'rgba(226,232,240,.78)', marginBottom: 14, lineHeight:1.5 }}>Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.</div>
-          <button className="btn bh" style={{ color: "var(--red)" }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
-          <div style={{ fontSize: 12, color: 'rgba(241,245,249,.9)', marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
+        <div className="card dark-form" style={{ background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.62))', border:'1px solid rgba(148,163,184,.14)', boxShadow:'0 18px 40px rgba(2,6,23,.14)', color:'#eef2ff' }}>
+          <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 18, fontWeight: 800, marginBottom: 10, color:'#eef2ff' }}>🪙 Coins beheren</div>
+          <div style={{ fontSize: 13, color: 'rgba(226,232,240,.82)', marginBottom: 14, lineHeight:1.5 }}>Handig als alle coins per ongeluk op 0 zijn gekomen of je opnieuw wilt beginnen.</div>
+          <button className="btn bh" style={{ color: '#fecaca', borderColor:'rgba(248,113,113,.24)', background:'rgba(127,29,29,.12)' }} onClick={() => db.resetAllCoins()}>Reset alle coins naar 0</button>
+          <div style={{ fontSize: 12, color: 'rgba(241,245,249,.92)', marginTop: 10 }}>Per kind aanpassen kan ook in het tabblad <strong>Kinderen</strong>.</div>
         </div>
       </div>
     </div>
@@ -4115,20 +4115,20 @@ function PurchasesTab({ data, db, getChild }) {
 
   return (
     <div>
-      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.80), rgba(15,23,42,.64))', border:'1px solid rgba(148,163,184,.16)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#f8fbff' }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(241,245,249,.88)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
+      <div style={{ marginTop:18, marginBottom:16, background:'linear-gradient(180deg, rgba(15,23,42,.78), rgba(15,23,42,.6))', border:'1px solid rgba(148,163,184,.14)', borderRadius:22, padding:18, boxShadow:'0 18px 40px rgba(2,6,23,.14)' }}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#eef2ff' }}>Aankopen & straffen 🛍️⚠️</div><div style={{ color:'rgba(226,232,240,.82)', fontSize:14 }}>Eén rustig overzicht voor goedkeuren, afwijzen en terugkijken.</div></div>
 
       {/* Filter */}
       <div className="frow" style={{ marginBottom:16 }}>
-        <button className={`btn bsm ${filter==="all"?"bp":"bh"}`} onClick={() => setFilter("all")}>Alle kinderen</button>
+        <button className="btn bsm" style={{ background: filter==="all" ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'rgba(255,255,255,.08)', color: filter==="all" ? '#ffffff' : '#dce7f5', border:'1px solid rgba(148,163,184,.18)' }} onClick={() => setFilter("all")}>Alle kinderen</button>
         {data.children.map(c => (
-          <button key={c.id} className={`btn bsm ${filter===c.id?"bp":"bh"}`} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
+          <button key={c.id} className="btn bsm" style={{ background: filter===c.id ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'rgba(255,255,255,.08)', color: filter===c.id ? '#ffffff' : '#dce7f5', border:'1px solid rgba(148,163,184,.18)' }} onClick={() => setFilter(c.id)}>{getChildAvatar(c)} {c.name}</button>
         ))}
       </div>
 
       {/* Wacht op goedkeuring */}
       {pendingList.length > 0 && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:"#92400e", marginBottom:10 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'#eef2ff', marginBottom:10 }}>
             ⏳ Wacht op jouw goedkeuring
           </div>
           {pendingList.map(r => <RedemptionRow key={r.id} r={r} />)}
@@ -4138,7 +4138,7 @@ function PurchasesTab({ data, db, getChild }) {
       {/* Eerder behandeld */}
       {restList.length > 0 && (
         <div>
-          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'rgba(241,245,249,.92)', marginBottom:10 }}>
+          <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:15, fontWeight:800, color:'#eef2ff', marginBottom:10 }}>
             Eerder behandeld
           </div>
           {restList.map(r => <RedemptionRow key={r.id} r={r} />)}
