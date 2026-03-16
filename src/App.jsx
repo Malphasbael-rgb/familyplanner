@@ -159,22 +159,28 @@ async function fetchCloudSettings() {
   const res = await supabase.from("rewards").select("id,title,description").eq("id", CLOUD_SETTINGS_REWARD_ID).maybeSingle();
   if (res.error) throw new Error(`loadCloudSettings: ${res.error.message}`);
   const raw = res.data?.description || "";
-  if (!raw) return { parentPin: null, lifetimeCoinsMap: {} };
+  if (!raw) return { parentPin: null, lifetimeCoinsMap: {}, childBirthDatesMap: {}, childCountdownsMap: {}, childActivitiesMap: {} };
   try {
     const parsed = JSON.parse(raw);
     return {
       parentPin: /^\d{6}$/.test(parsed?.parentPin || "") ? parsed.parentPin : null,
       lifetimeCoinsMap: parsed?.lifetimeCoinsMap && typeof parsed.lifetimeCoinsMap === "object" ? parsed.lifetimeCoinsMap : {},
+      childBirthDatesMap: parsed?.childBirthDatesMap && typeof parsed.childBirthDatesMap === "object" ? parsed.childBirthDatesMap : {},
+      childCountdownsMap: parsed?.childCountdownsMap && typeof parsed.childCountdownsMap === "object" ? parsed.childCountdownsMap : {},
+      childActivitiesMap: parsed?.childActivitiesMap && typeof parsed.childActivitiesMap === "object" ? parsed.childActivitiesMap : {},
     };
   } catch {
-    return { parentPin: null, lifetimeCoinsMap: {} };
+    return { parentPin: null, lifetimeCoinsMap: {}, childBirthDatesMap: {}, childCountdownsMap: {}, childActivitiesMap: {} };
   }
 }
 async function saveCloudSettingsToCloud(patch = {}) {
-  const current = await fetchCloudSettings().catch(() => ({ parentPin: null, lifetimeCoinsMap: {} }));
+  const current = await fetchCloudSettings().catch(() => ({ parentPin: null, lifetimeCoinsMap: {}, childBirthDatesMap: {}, childCountdownsMap: {}, childActivitiesMap: {} }));
   const next = {
     parentPin: /^\d{6}$/.test(String(patch.parentPin ?? current.parentPin ?? "")) ? String(patch.parentPin ?? current.parentPin) : null,
     lifetimeCoinsMap: patch.lifetimeCoinsMap && typeof patch.lifetimeCoinsMap === "object" ? patch.lifetimeCoinsMap : (current.lifetimeCoinsMap || {}),
+    childBirthDatesMap: patch.childBirthDatesMap && typeof patch.childBirthDatesMap === "object" ? patch.childBirthDatesMap : (current.childBirthDatesMap || {}),
+    childCountdownsMap: patch.childCountdownsMap && typeof patch.childCountdownsMap === "object" ? patch.childCountdownsMap : (current.childCountdownsMap || {}),
+    childActivitiesMap: patch.childActivitiesMap && typeof patch.childActivitiesMap === "object" ? patch.childActivitiesMap : (current.childActivitiesMap || {}),
   };
   const payload = { id: CLOUD_SETTINGS_REWARD_ID, title: CLOUD_SETTINGS_TITLE, description: JSON.stringify(next), cost: 999999, emoji: "🔐" };
   const res = await supabase.from("rewards").upsert(payload, { onConflict: "id" }).select("id").single();
@@ -1176,6 +1182,123 @@ function findRuleBasedTaskEmoji(title = "", desc = "", dayPart = "allDay") {
   });
   if (best && best.score >= 30) return best.emoji;
   return null;
+}
+
+const ACTIVITY_EMOJI_RULES = [
+  { e: "🏫", patterns: ["school", "naar school", "basisschool", "middelbare school"] },
+  { e: "⚽", patterns: ["voetbal", "training voetbal", "wedstrijd voetbal"] },
+  { e: "🏊", patterns: ["zwemmen", "zwemles", "zwembad"] },
+  { e: "🎹", patterns: ["piano", "muziekles", "keyboard"] },
+  { e: "🎵", patterns: ["muziek", "zingen", "koor"] },
+  { e: "🩰", patterns: ["dans", "ballet", "dansles"] },
+  { e: "🤸", patterns: ["turnen", "gymnastiek"] },
+  { e: "🥋", patterns: ["judo", "karate", "taekwondo"] },
+  { e: "🎾", patterns: ["tennis"] },
+  { e: "🏑", patterns: ["hockey"] },
+  { e: "🏀", patterns: ["basketbal"] },
+  { e: "🏐", patterns: ["volleybal"] },
+  { e: "🚴", patterns: ["fietsen", "fiets"] },
+  { e: "🎨", patterns: ["tekenen", "kunst", "knutselen", "schilderen"] },
+  { e: "📚", patterns: ["lezen", "bibliotheek", "boek"] },
+  { e: "📝", patterns: ["huiswerk", "leren", "studie"] },
+  { e: "👵", patterns: ["oma", "opa", "opa en oma", "grootouders"] },
+  { e: "🎉", patterns: ["feestje", "partijtje", "verjaardag"] },
+  { e: "🛏️", patterns: ["logeren", "slapen"] },
+  { e: "🏖️", patterns: ["vakantie", "strand", "uitje"] },
+  { e: "🛝", patterns: ["speeltuin"] },
+  { e: "🎭", patterns: ["theater", "toneel"] },
+  { e: "⚕️", patterns: ["dokter", "tandarts", "ziekenhuis"] },
+  { e: "🧑‍🏫", patterns: ["bijles", "les"] },
+];
+
+function guessActivityEmoji(title = "") {
+  const source = normalizeEmojiSearchText(title);
+  if (!source) return "✨";
+  let best = null;
+  ACTIVITY_EMOJI_RULES.forEach(rule => {
+    let score = 0;
+    rule.patterns.forEach(pattern => {
+      const p = normalizeEmojiSearchText(pattern);
+      if (!p) return;
+      if (source.includes(p)) score = Math.max(score, 100 + p.length);
+      else {
+        const words = p.split(" ").filter(Boolean);
+        const matched = words.filter(w => source.includes(w)).length;
+        if (matched === words.length && words.length > 0) score = Math.max(score, 70 + words.join("").length);
+        else if (matched > 0) score = Math.max(score, matched * 10);
+      }
+    });
+    if (!best || score > best.score) best = { emoji: rule.e, score };
+  });
+  if (best && best.score >= 30) return best.emoji;
+  return findRuleBasedTaskEmoji(title, title, "allDay") || searchEmojis(title)[0] || "✨";
+}
+
+function sanitizeActivity(item = {}) {
+  const days = Array.isArray(item.days)
+    ? [...new Set(item.days.map(v => Number(v)).filter(v => Number.isInteger(v) && v >= 0 && v <= 6))].sort((a,b) => a-b)
+    : [];
+  const title = String(item.title || "").trim();
+  const time = String(item.time || "").trim();
+  return {
+    id: item.id || genId(),
+    title,
+    time,
+    days,
+    active: item.active !== false,
+    emoji: item.emoji || guessActivityEmoji(title),
+  };
+}
+
+function sortActivities(items = []) {
+  return [...items].sort((a, b) => {
+    const ta = String(a.time || "99:99");
+    const tb = String(b.time || "99:99");
+    if (ta !== tb) return ta.localeCompare(tb);
+    return String(a.title || "").localeCompare(String(b.title || ""), "nl");
+  });
+}
+
+function getActivitiesForDay(activityMap = {}, childId, weekdayIndex) {
+  const list = Array.isArray(activityMap?.[childId]) ? activityMap[childId] : [];
+  return sortActivities(list.map(sanitizeActivity).filter(a => a.active !== false && a.days.includes(weekdayIndex) && a.title));
+}
+
+function getBirthDateForChild(childBirthDatesMap = {}, childId) {
+  const value = String(childBirthDatesMap?.[childId] || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+}
+
+function getCountdownInfoForChild(child, childBirthDatesMap = {}, childCountdownsMap = {}, referenceDate = getTodayISO()) {
+  const cfg = childCountdownsMap?.[child?.id] || null;
+  if (!cfg || cfg.active === false) return null;
+  const today = new Date(`${referenceDate}T00:00:00`);
+  if (cfg.type === "birthday") {
+    const birthDate = getBirthDateForChild(childBirthDatesMap, child?.id);
+    if (!birthDate) return null;
+    const [, month, day] = birthDate.split("-");
+    let target = new Date(`${today.getFullYear()}-${month}-${day}T00:00:00`);
+    if (target < today) target = new Date(`${today.getFullYear() + 1}-${month}-${day}T00:00:00`);
+    const days = Math.max(0, Math.round((target - today) / 86400000));
+    const birthYear = Number(birthDate.slice(0,4));
+    const age = Number.isFinite(birthYear) ? (target.getFullYear() - birthYear) : null;
+    return {
+      emoji: cfg.emoji || "🎂",
+      title: age ? `Nog ${days} ${days === 1 ? 'dag' : 'dagen'} tot je ${age}e verjaardag` : `Nog ${days} ${days === 1 ? 'dag' : 'dagen'} tot je verjaardag`,
+      subtitle: `${day}-${month}-${target.getFullYear()}`,
+      days,
+    };
+  }
+  const date = String(cfg.date || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const target = new Date(`${date}T00:00:00`);
+  const days = Math.max(0, Math.round((target - today) / 86400000));
+  return {
+    emoji: cfg.emoji || guessActivityEmoji(cfg.title || "event"),
+    title: `Nog ${days} ${days === 1 ? 'dag' : 'dagen'} tot ${String(cfg.title || 'het event').trim()}`,
+    subtitle: date,
+    days,
+  };
 }
 
 function searchEmojis(query) {
@@ -2373,6 +2496,9 @@ export default function App() {
   const [showFeest, setShowFeest] = useState(false);
   const [levelUpEvent, setLevelUpEvent] = useState(null);
   const [lifetimeCoinsMap, setLifetimeCoinsMap] = useState({});
+  const [childBirthDatesMap, setChildBirthDatesMap] = useState({});
+  const [childCountdownsMap, setChildCountdownsMap] = useState({});
+  const [childActivitiesMap, setChildActivitiesMap] = useState({});
   const [pinChild,  setPinChild]  = useState(null);
   const [pinParent, setPinParent] = useState(false);
   const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
@@ -2431,6 +2557,9 @@ export default function App() {
             setParentPin(getStoredParentPin());
           }
           setLifetimeCoinsMap(cloudSettings.lifetimeCoinsMap && Object.keys(cloudSettings.lifetimeCoinsMap).length > 0 ? cloudSettings.lifetimeCoinsMap : localLifetime);
+          setChildBirthDatesMap(cloudSettings.childBirthDatesMap || {});
+          setChildCountdownsMap(cloudSettings.childCountdownsMap || {});
+          setChildActivitiesMap(cloudSettings.childActivitiesMap || {});
         } else {
           setParentPin(getStoredParentPin());
           setLifetimeCoinsMap(localLifetime);
@@ -2638,7 +2767,7 @@ export default function App() {
       const nextLifetimeMap = { ...lifetimeCoinsMap, [id]: 0 };
       setLifetimeCoinsMap(nextLifetimeMap);
       saveLifetimeCoins(nextLifetimeMap);
-      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap: nextLifetimeMap }).catch(err => console.error("saveLifetimeCoinsToCloud:", err));
+      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap: nextLifetimeMap, childBirthDatesMap, childCountdownsMap, childActivitiesMap }).catch(err => console.error("saveLifetimeCoinsToCloud:", err));
       reload();
     },
     updateChildPin: async (id, pin) => {
@@ -2675,14 +2804,40 @@ export default function App() {
     },
     updateParentPin: async (pin) => {
       if (!/^\d{6}$/.test(pin || "")) return;
-      await saveCloudSettingsToCloud({ parentPin: pin, lifetimeCoinsMap });
+      await saveCloudSettingsToCloud({ parentPin: pin, lifetimeCoinsMap, childBirthDatesMap, childCountdownsMap, childActivitiesMap });
       setStoredParentPin(pin);
       setParentPin(pin);
       reload();
     },
     delChild: async (id) => {
       await dbDelChild(id);
-      setLifetimeCoinsMap(prev => { const next = { ...prev }; delete next[id]; return next; });
+      const nextLifetimeMap = { ...lifetimeCoinsMap }; delete nextLifetimeMap[id];
+      const nextBirthMap = { ...childBirthDatesMap }; delete nextBirthMap[id];
+      const nextCountdownMap = { ...childCountdownsMap }; delete nextCountdownMap[id];
+      const nextActivitiesMap = { ...childActivitiesMap }; delete nextActivitiesMap[id];
+      setLifetimeCoinsMap(nextLifetimeMap);
+      setChildBirthDatesMap(nextBirthMap);
+      setChildCountdownsMap(nextCountdownMap);
+      setChildActivitiesMap(nextActivitiesMap);
+      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap: nextLifetimeMap, childBirthDatesMap: nextBirthMap, childCountdownsMap: nextCountdownMap, childActivitiesMap: nextActivitiesMap }).catch(err => console.error("saveCloudSettingsToCloud:", err));
+      reload();
+    },
+    updateChildBirthDate: async (id, birthDate) => {
+      const nextBirthMap = { ...childBirthDatesMap, [id]: /^\d{4}-\d{2}-\d{2}$/.test(String(birthDate || "")) ? String(birthDate) : "" };
+      setChildBirthDatesMap(nextBirthMap);
+      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap, childBirthDatesMap: nextBirthMap, childCountdownsMap, childActivitiesMap }).catch(err => console.error("saveCloudSettingsToCloud:", err));
+      reload();
+    },
+    saveChildCountdown: async (id, countdown) => {
+      const nextCountdownMap = { ...childCountdownsMap, [id]: countdown || null };
+      setChildCountdownsMap(nextCountdownMap);
+      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap, childBirthDatesMap, childCountdownsMap: nextCountdownMap, childActivitiesMap }).catch(err => console.error("saveCloudSettingsToCloud:", err));
+      reload();
+    },
+    saveChildActivities: async (id, activities) => {
+      const nextActivitiesMap = { ...childActivitiesMap, [id]: sortActivities((activities || []).map(sanitizeActivity).filter(a => a.title && a.days.length)) };
+      setChildActivitiesMap(nextActivitiesMap);
+      await saveCloudSettingsToCloud({ parentPin, lifetimeCoinsMap, childBirthDatesMap, childCountdownsMap, childActivitiesMap: nextActivitiesMap }).catch(err => console.error("saveCloudSettingsToCloud:", err));
       reload();
     },
     addTask: async (t) => {
@@ -3296,7 +3451,7 @@ function HomeScreen({ data, onSelectKid, onParent, playDrumroll, getLifetimeCoin
 }
 
 // ─── CHILD VIEW ────────────────────────────────────────────────────────────────
-function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, getLifetimeCoinsForChild }) {
+function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playAllDone, playSpend, onAllDone, coinTargetRef, getLifetimeCoinsForChild, childBirthDatesMap, childCountdownsMap, childActivitiesMap }) {
   const cur = data.children.find(c => c.id === activeKid);
   const todayNow = getTodayISO();
   const activeTasks = dedupeVisibleTasks(data.tasks
@@ -3339,8 +3494,11 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const celebFired   = useRef(false);
 
   const d = new Date();
-  const dagNaam  = DAGEN[d.getDay()];
+  const dagIndex = d.getDay();
+  const dagNaam  = DAGEN[dagIndex];
   const volledig = `${d.getDate()} ${MAANDEN[d.getMonth()]} ${d.getFullYear()}`;
+  const countdownInfo = getCountdownInfoForChild(cur, childBirthDatesMap, childCountdownsMap, todayNow);
+  const todayActivities = getActivitiesForDay(childActivitiesMap, activeKid, dagIndex);
 
   // animate coin counter when coins change
   useEffect(() => {
@@ -3435,6 +3593,39 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
           <div>
             <div className="kid-fact-label" style={{ color: th.pri }}>🤩 Wist je dat...</div>
             <div className="kid-fact-text">{feitje.feit}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="kid-info-row" style={{ marginTop: 0 }}>
+        <div className="kid-date-card" style={{ border: `2px solid ${th.pri}33`, background: "#fff", minHeight: 120 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: th.pri, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 6 }}>⏳ Aftellen</div>
+          {countdownInfo ? (
+            <>
+              <div style={{ fontSize: 28, lineHeight: 1, marginBottom: 8 }}>{countdownInfo.emoji}</div>
+              <div style={{ fontWeight: 900, fontSize: 16, color: th.priD, lineHeight: 1.25 }}>{countdownInfo.title}</div>
+              <div className="kid-date-card-full" style={{ marginTop: 6 }}>{countdownInfo.subtitle}</div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--t2)', lineHeight: 1.45 }}>Nog geen afteller ingesteld. Vraag papa of mama om er eentje toe te voegen.</div>
+          )}
+        </div>
+        <div className="kid-fact-card" style={{ border: `2px solid ${th.pri}33`, background: "#fff", minHeight: 120 }}>
+          <div>
+            <div className="kid-fact-label" style={{ color: th.pri, marginBottom: 8 }}>🗓️ Vandaag op de planning</div>
+            {todayActivities.length > 0 ? (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                {todayActivities.map(item => (
+                  <div key={item.id} style={{ background:`${th.pri}14`, color:th.priD, border:`1px solid ${th.pri}2e`, borderRadius:999, padding:'8px 10px', fontSize:12, fontWeight:800, display:'flex', alignItems:'center', gap:6 }}>
+                    <span style={{ fontSize: 16 }}>{item.emoji || guessActivityEmoji(item.title)}</span>
+                    <span>{item.title}</span>
+                    {item.time ? <span style={{ opacity:.75 }}>· {item.time}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="kid-fact-text">Vandaag staan er nog geen extra activiteiten op je planning.</div>
+            )}
           </div>
         </div>
       </div>
@@ -3891,7 +4082,7 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
   );
 }
 
-function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoinsForChild }) {
+function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoinsForChild, childBirthDatesMap, childCountdownsMap, childActivitiesMap }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
@@ -3963,7 +4154,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoi
       {tab === "tasks"     && <TasksTab     data={data} db={db} setModal={setModal} getChild={getChild} />}
       {tab === "recurring" && <RecurringTab data={data} db={db} getChild={getChild} />}
       {tab === "approve"   && <ApproveTab   data={data} db={db} pending={pending}   getChild={getChild} />}
-      {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} />}
+      {tab === "kids"      && <KidsTab      data={data} db={db} setModal={setModal} childBirthDatesMap={childBirthDatesMap} childCountdownsMap={childCountdownsMap} childActivitiesMap={childActivitiesMap} />}
       {tab === "rewards"   && <RewardsTab   data={data} db={db} setModal={setModal} />}
       {tab === "purchases" && <PurchasesTab data={data} db={db} getChild={getChild} />}
       {tab === "settings"  && <SettingsTab data={data} db={db} parentPin={parentPin} />}
@@ -4220,16 +4411,29 @@ function ApproveTab({ data, db, pending, getChild }) {
   );
 }
 
-function KidsTab({ data, db, setModal }) {
+function KidsTab({ data, db, setModal, childBirthDatesMap, childCountdownsMap, childActivitiesMap }) {
   const [pinDrafts, setPinDrafts] = useState({});
   const [coinDrafts, setCoinDrafts] = useState({});
   const [penaltyDrafts, setPenaltyDrafts] = useState({});
   const [penaltyReasons, setPenaltyReasons] = useState({});
+  const [birthDateDrafts, setBirthDateDrafts] = useState({});
+  const [countdownDrafts, setCountdownDrafts] = useState({});
+  const [activityDrafts, setActivityDrafts] = useState({});
 
   const pinValue = (child) => pinDrafts[child.id] ?? child.pin ?? "";
   const coinValue = (child) => coinDrafts[child.id] ?? String(child.coins ?? 0);
   const penaltyValue = (child) => penaltyDrafts[child.id] ?? "";
   const penaltyReasonValue = (child) => penaltyReasons[child.id] ?? "";
+  const birthDateValue = (child) => birthDateDrafts[child.id] ?? getBirthDateForChild(childBirthDatesMap, child.id) ?? "";
+  const countdownDraftValue = (child) => countdownDrafts[child.id] ?? (childCountdownsMap?.[child.id] || { type:'birthday', title:'', date:'', emoji:'🎂', active:true });
+  const activityDraftValue = (child) => activityDrafts[child.id] ?? { title:'', time:'', days:[1,2,3,4,5] };
+
+  const toggleActivityDay = (childId, dayIndex) => {
+    const draft = activityDraftValue({ id: childId });
+    const days = Array.isArray(draft.days) ? draft.days : [];
+    const nextDays = days.includes(dayIndex) ? days.filter(d => d !== dayIndex) : [...days, dayIndex].sort((a,b)=>a-b);
+    setActivityDrafts(s => ({ ...s, [childId]: { ...draft, days: nextDays } }));
+  };
 
   return (
     <div>
@@ -4285,6 +4489,75 @@ function KidsTab({ data, db, setModal }) {
             </div>
             <div style={{ fontSize: 12, color: '#fdba74', marginBottom: 12, lineHeight:1.45 }}>Het kind ziet deze straf met reden terug in zijn geschiedenis.</div>
 
+            <div style={{ borderTop:"1px dashed var(--line)", margin:"10px 0 12px" }} />
+            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 16, fontWeight: 800, marginBottom: 8, color: "#c7d2fe" }}>🎂 Verjaardag & aftellen</div>
+            <div className="fg" style={{ textAlign:'left', marginBottom:10 }}>
+              <label className="fl">Geboortedatum</label>
+              <input className="fi" type="date" value={birthDateValue(c)} onChange={e => setBirthDateDrafts(s => ({ ...s, [c.id]: e.target.value }))} />
+            </div>
+            <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap' }}>
+              <button className="btn bg bsm" style={{ flex:1 }} onClick={() => db.updateChildBirthDate(c.id, birthDateValue(c))}>Geboortedatum opslaan</button>
+            </div>
+            <div className="fg" style={{ textAlign:'left', marginBottom:10 }}>
+              <label className="fl">Aftellen naar</label>
+              <select className="fi" value={countdownDraftValue(c).type || 'birthday'} onChange={e => setCountdownDrafts(s => ({ ...s, [c.id]: { ...countdownDraftValue(c), type: e.target.value, emoji: e.target.value === 'birthday' ? '🎂' : (countdownDraftValue(c).emoji || '✨') } }))}>
+                <option value="birthday">🎂 Verjaardag</option>
+                <option value="manual">✨ Handmatig event</option>
+              </select>
+            </div>
+            {countdownDraftValue(c).type === 'manual' && (
+              <>
+                <div className="fg" style={{ textAlign:'left', marginBottom:10 }}>
+                  <label className="fl">Titel van het event</label>
+                  <input className="fi" value={countdownDraftValue(c).title || ''} onChange={e => setCountdownDrafts(s => ({ ...s, [c.id]: { ...countdownDraftValue(c), title: e.target.value, emoji: guessActivityEmoji(e.target.value) } }))} placeholder="Bijv. vakantie of schoolreisje" />
+                </div>
+                <div className="fg" style={{ textAlign:'left', marginBottom:10 }}>
+                  <label className="fl">Datum van het event</label>
+                  <input className="fi" type="date" value={countdownDraftValue(c).date || ''} onChange={e => setCountdownDrafts(s => ({ ...s, [c.id]: { ...countdownDraftValue(c), date: e.target.value } }))} />
+                </div>
+              </>
+            )}
+            <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap' }}>
+              <button className="btn bg bsm" style={{ flex:1 }} onClick={() => db.saveChildCountdown(c.id, countdownDraftValue(c).type === 'birthday' ? { type:'birthday', emoji:'🎂', active:true } : { type:'manual', title:String(countdownDraftValue(c).title || '').trim(), date:countdownDraftValue(c).date || '', emoji: guessActivityEmoji(countdownDraftValue(c).title || 'event'), active:true })} disabled={countdownDraftValue(c).type === 'manual' && (!String(countdownDraftValue(c).title || '').trim() || !String(countdownDraftValue(c).date || '').trim())}>Afteller opslaan</button>
+              <button className="btn bsm" style={{ flex:1, background:'rgba(255,255,255,.08)', color:'#eef2ff', border:'1px solid rgba(148,163,184,.18)' }} onClick={() => db.saveChildCountdown(c.id, null)}>Afteller wissen</button>
+            </div>
+
+            <div style={{ borderTop:"1px dashed var(--line)", margin:"10px 0 12px" }} />
+            <div style={{ fontFamily: "'Baloo 2',cursive", fontSize: 16, fontWeight: 800, marginBottom: 8, color: "#c7d2fe" }}>🗓️ Activiteiten per weekdag</div>
+            <div className="fg" style={{ textAlign:'left', marginBottom:10 }}>
+              <label className="fl">Activiteit</label>
+              <input className="fi" value={activityDraftValue(c).title || ''} onChange={e => setActivityDrafts(s => ({ ...s, [c.id]: { ...activityDraftValue(c), title: e.target.value } }))} placeholder="Bijv. School, voetbal, muziekles" />
+            </div>
+            <div className="fg" style={{ textAlign:'left', marginBottom:10 }}>
+              <label className="fl">Tijd (optioneel)</label>
+              <input className="fi" type="time" value={activityDraftValue(c).time || ''} onChange={e => setActivityDrafts(s => ({ ...s, [c.id]: { ...activityDraftValue(c), time: e.target.value } }))} />
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:10, justifyContent:'flex-start' }}>
+              {DAGEN.map((dag, dayIndex) => {
+                const active = (activityDraftValue(c).days || []).includes(dayIndex);
+                return <button key={dag} type="button" className="btn bsm" style={{ background: active ? 'linear-gradient(135deg, rgba(99,102,241,.28), rgba(59,130,246,.18))' : 'rgba(255,255,255,.08)', color: active ? '#ffffff' : '#dce7f5', border:'1px solid rgba(148,163,184,.18)' }} onClick={() => toggleActivityDay(c.id, dayIndex)}>{dag.slice(0,2)}</button>;
+              })}
+            </div>
+            <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap' }}>
+              <button className="btn bg bsm" style={{ flex:1 }} onClick={() => {
+                const current = Array.isArray(childActivitiesMap?.[c.id]) ? childActivitiesMap[c.id] : [];
+                const draft = activityDraftValue(c);
+                const item = sanitizeActivity({ title: draft.title, time: draft.time, days: draft.days, emoji: guessActivityEmoji(draft.title) });
+                db.saveChildActivities(c.id, [...current, item]);
+                setActivityDrafts(s => ({ ...s, [c.id]: { title:'', time:'', days:[1,2,3,4,5] } }));
+              }} disabled={!String(activityDraftValue(c).title || '').trim() || !(activityDraftValue(c).days || []).length}>Activiteit toevoegen</button>
+            </div>
+            <div style={{ display:'grid', gap:8, marginBottom:12 }}>
+              {sortActivities((childActivitiesMap?.[c.id] || []).map(sanitizeActivity)).map(item => (
+                <div key={item.id} style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(148,163,184,.16)', borderRadius:16, padding:'10px 12px', textAlign:'left' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, fontWeight:800, color:'#eef2ff', marginBottom:4 }}><span style={{ fontSize:18 }}>{item.emoji || guessActivityEmoji(item.title)}</span><span>{item.title}</span>{item.time ? <span style={{ fontSize:12, color:'#c7d2fe', marginLeft:'auto' }}>{item.time}</span> : null}</div>
+                  <div style={{ fontSize:12, color:'rgba(226,232,240,.78)', marginBottom:8 }}>{item.days.map(i => DAGEN[i]).join(', ')}</div>
+                  <button className="btn bsm" style={{ background:'rgba(127,29,29,.12)', color:'#fecaca', border:'1px solid rgba(248,113,113,.24)' }} onClick={() => db.saveChildActivities(c.id, (childActivitiesMap?.[c.id] || []).filter(x => x.id !== item.id))}>Verwijder activiteit</button>
+                </div>
+              ))}
+              {(!childActivitiesMap?.[c.id] || childActivitiesMap[c.id].length === 0) && <div style={{ fontSize:12, color:'rgba(226,232,240,.72)', textAlign:'left' }}>Nog geen weekactiviteiten ingesteld.</div>}
+            </div>
+
             <button className="btn bh bsm" style={{ color: '#fecaca', borderColor:'rgba(248,113,113,.32)', background:'rgba(127,29,29,.12)' }} onClick={() => db.delChild(c.id)}>Verwijder</button>
           </div>
         ))}
@@ -4297,6 +4570,13 @@ function KidsTab({ data, db, setModal }) {
 function SettingsTab({ data, db, parentPin }) {
   const [pinDraft, setPinDraft] = useState(parentPin || DEFAULT_PARENT_PIN);
   useEffect(() => { setPinDraft(parentPin || DEFAULT_PARENT_PIN); }, [parentPin]);
+  const toggleActivityDay = (childId, dayIndex) => {
+    const draft = activityDraftValue({ id: childId });
+    const days = Array.isArray(draft.days) ? draft.days : [];
+    const nextDays = days.includes(dayIndex) ? days.filter(d => d !== dayIndex) : [...days, dayIndex].sort((a,b)=>a-b);
+    setActivityDrafts(s => ({ ...s, [childId]: { ...draft, days: nextDays } }));
+  };
+
   return (
     <div>
       <div style={parentQuietUi.header()}><div style={{ fontFamily:"'Baloo 2',cursive", fontSize:24, fontWeight:800, color:'#eef2ff' }}>Instellingen ⚙️</div><div style={{ color:'rgba(226,232,240,.82)', fontSize:14 }}>Kleine controlekamer voor oudercode en globale resets.</div></div>
@@ -4322,6 +4602,13 @@ function SettingsTab({ data, db, parentPin }) {
 }
 
 function RewardsTab({ data, db, setModal }) {
+  const toggleActivityDay = (childId, dayIndex) => {
+    const draft = activityDraftValue({ id: childId });
+    const days = Array.isArray(draft.days) ? draft.days : [];
+    const nextDays = days.includes(dayIndex) ? days.filter(d => d !== dayIndex) : [...days, dayIndex].sort((a,b)=>a-b);
+    setActivityDrafts(s => ({ ...s, [childId]: { ...draft, days: nextDays } }));
+  };
+
   return (
     <div>
       <div style={parentQuietUi.header({ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap' })}><div><div style={parentQuietUi.title()}>Beloningen 🎁</div><div style={parentQuietUi.subtitle()}>Rustigere kaarten voor beloningen, met focus op prijs en doelgroep.</div></div><button className="btn bp" style={parentQuietUi.primaryButton()} onClick={() => setModal({ type: "reward" })}>+ Beloning</button></div>
@@ -4412,6 +4699,13 @@ function PurchasesTab({ data, db, getChild }) {
         )}
       </div>
     );
+  };
+
+  const toggleActivityDay = (childId, dayIndex) => {
+    const draft = activityDraftValue({ id: childId });
+    const days = Array.isArray(draft.days) ? draft.days : [];
+    const nextDays = days.includes(dayIndex) ? days.filter(d => d !== dayIndex) : [...days, dayIndex].sort((a,b)=>a-b);
+    setActivityDrafts(s => ({ ...s, [childId]: { ...draft, days: nextDays } }));
   };
 
   return (
