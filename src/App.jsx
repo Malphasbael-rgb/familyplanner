@@ -2969,23 +2969,51 @@ function TasksTab({ data, db, setModal, getChild }) {
   const [filter, setFilter] = useState("all");
   const [showHistory, setShowHistory] = useState(false);
   const todayNow = getTodayISO();
+
   const tasks = [...data.tasks]
-    .filter(t => (
-      (filter === "all" || t.childId === filter) &&
-      (
-        t.status === "template" ||
-        t.status === "pending" ||
-        shouldKeepCompletedVisible(t, todayNow) ||
-        (showHistory && (t.status === "done" || t.status === "approved") && !isTaskOlderThanHistoryWindow(t, todayNow))
-      )
-    ))
-    .sort((a,b) => a.date.localeCompare(b.date));
+    .filter(t => (filter === "all" || t.childId === filter))
+    .filter((task) => {
+      const info = parseTaskDesc(task.desc, task.coins);
+      const isGeneratedRecurringTask = !isRecurringTemplateTask(task) && !!info.recurrenceSourceId;
+      if (isGeneratedRecurringTask) return false;
+      if (task.status === "template") return true;
+      if (task.status === "pending") return true;
+      if (shouldKeepCompletedVisible(task, todayNow)) return true;
+      if (showHistory && (task.status === "done" || task.status === "approved") && !isTaskOlderThanHistoryWindow(task, todayNow)) return true;
+      return false;
+    })
+    .sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return String(a.title || "").localeCompare(String(b.title || ""));
+    });
+
   const statusEl = (s) => {
     if (s === "template") return <span className="bd" style={{ background: "#ede9fe", color: "#6d28d9" }}>🔁 Sjabloon</span>;
     if (s === "pending") return <span className="bd bbl">Te doen</span>;
     if (s === "done") return <span className="bd by">⏳ Wacht</span>;
     return <span className="bd bgn">✅ Klaar</span>;
   };
+
+  const getValidityLabel = (task) => {
+    const info = parseTaskDesc(task.desc, task.coins);
+    const recurrenceType = getRecurringType(task);
+    if (recurrenceType === "daily") return "Geldig op die dag";
+    if (recurrenceType === "weekly" || info.dayPart === "weekly") {
+      if (info.durationDays <= 1) return "1 dag om af te ronden";
+      return `${info.durationDays} dagen om af te ronden`;
+    }
+    if (info.durationDays <= 1) return "1 dag geldig";
+    return `${info.durationDays} dagen geldig`;
+  };
+
+  const getCoinLabel = (task) => {
+    const info = parseTaskDesc(task.desc, task.coins);
+    if (task.status === "template") {
+      return `🪙${info.maxCoins}`;
+    }
+    return `🪙${task.coins}`;
+  };
+
   return (
     <div>
       <div className="sh">
@@ -3000,27 +3028,29 @@ function TasksTab({ data, db, setModal, getChild }) {
         ))}
       </div>
 
-
       {tasks.length === 0
-        ? <div className="emp"><div className="ei">📋</div><div className="et">Geen losse taken — maak er een aan!</div></div>
+        ? <div className="emp"><div className="ei">📋</div><div className="et">Geen geplande taken zichtbaar.</div></div>
         : tasks.map(t => {
           const ch = getChild(t.childId);
+          const info = parseTaskDesc(t.desc, t.coins);
+          const recurrenceType = getRecurringType(t);
           return (
             <div key={t.id} className="tr">
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: 14 }}>{t.title}</span>{statusEl(t.status)}
-                                  </div>
+                </div>
                 <div style={{ fontSize: 12, color: "var(--t2)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {ch && <span>{ch.avatar} {ch.name}</span>}
                   <span>📅 {t.date}</span>
-                  <span>{getDayPartConfig(parseTaskDesc(t.desc, t.coins).dayPart).emoji} {getDayPartLabel(parseTaskDesc(t.desc, t.coins).dayPart)}</span>
-                  <span>{parseTaskDesc(t.desc, t.coins).requiresParentApproval ? "👨‍👩‍👧 Ouder keurt goed" : "⚡ Direct klaar"}</span>
-                  {getRecurringType(t) !== "none" && <span>🔁 {getRecurringLabel(t)}</span>}
-                  {parseTaskDesc(t.desc, t.coins).visibleDesc && <span>💬 {parseTaskDesc(t.desc, t.coins).visibleDesc}</span>}
+                  <span>{getDayPartConfig(info.dayPart).emoji} {getDayPartLabel(info.dayPart)}</span>
+                  <span>⏳ {getValidityLabel(t)}</span>
+                  <span>{info.requiresParentApproval ? "👨‍👩‍👧 Ouder keurt goed" : "⚡ Direct klaar"}</span>
+                  {recurrenceType !== "none" && <span>🔁 {getRecurringLabel(t)}</span>}
+                  {info.visibleDesc && <span>💬 {info.visibleDesc}</span>}
                 </div>
               </div>
-              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>🪙{t.coins} <span style={{ fontSize: 11, color: "var(--t2)" }}>/ {parseTaskDesc(t.desc, t.coins).maxCoins}</span></span>
+              <span style={{ fontWeight: 800, color: "var(--yel)", fontSize: 14, whiteSpace: "nowrap" }}>{getCoinLabel(t)} <span style={{ fontSize: 11, color: "var(--t2)" }}>/ {info.maxCoins}</span></span>
               <button className="btn bh bsm" style={{ color: "var(--red)" }} onClick={() => db.delTask(t.id)}>🗑</button>
             </div>
           );
