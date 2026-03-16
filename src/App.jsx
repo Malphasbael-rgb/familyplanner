@@ -976,23 +976,94 @@ const EMOJI_DB = [
 
 const ALL_EMOJIS = EMOJI_DB.map(x => x.e);
 
+function normalizeEmojiSearchText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const TASK_EMOJI_RULES = [
+  { e: "🪥", patterns: ["tanden poetsen", "poets tanden", "tanden", "mond spoelen", "mondverzorging"] },
+  { e: "🛏️", patterns: ["bed opmaken", "bed maken", "bedtijd", "naar bed", "pyjama", "slaap"] },
+  { e: "🚿", patterns: ["douchen", "douche", "wassen", "haar wassen", "bad nemen", "in bad"] },
+  { e: "👕", patterns: ["aankleden", "omkleden", "kleren aantrekken", "jas aandoen"] },
+  { e: "🧦", patterns: ["sokken", "schoenen aandoen", "schoenen aantrekken"] },
+  { e: "🧸", patterns: ["speelgoed opruimen", "speelgoed", "knuffels opruimen", "kamer netjes"] },
+  { e: "🧹", patterns: ["opruimen", "opruim", "vegen", "stofzuigen", "schoonmaken", "poetsen", "afstoffen"] },
+  { e: "🗑️", patterns: ["vuilnis", "afval", "prullenbak", "container", "kliko"] },
+  { e: "🧺", patterns: ["wasmand", "was", "kleding wassen", "kleren opruimen", "was opvouwen"] },
+  { e: "🍽️", patterns: ["tafel dekken", "tafel afruimen", "borden", "keuken helpen", "afwassen"] },
+  { e: "🍎", patterns: ["fruit eten", "fruit", "appel eten", "gezond eten", "groente eten"] },
+  { e: "🥤", patterns: ["drinken", "water drinken", "melk drinken", "sap drinken"] },
+  { e: "📚", patterns: ["lezen", "boek lezen", "voorlezen", "bibliotheek", "huiswerk lezen"] },
+  { e: "✏️", patterns: ["schrijven", "tekenen", "kleurplaat", "kleuren", "oefenen schrijven"] },
+  { e: "🧮", patterns: ["rekenen", "sommen", "tafels oefenen"] },
+  { e: "🎒", patterns: ["schooltas", "tas inpakken", "school spullen", "naar school"] },
+  { e: "📝", patterns: ["huiswerk", "opdracht maken", "werkblad", "leren"] },
+  { e: "🎹", patterns: ["piano", "keyboard", "muziek oefenen"] },
+  { e: "🎸", patterns: ["gitaar", "muziekles", "instrument oefenen"] },
+  { e: "🎵", patterns: ["zingen", "liedje oefenen", "muziek luisteren"] },
+  { e: "⚽", patterns: ["voetbal", "buiten spelen", "trainen", "sport", "bewegen"] },
+  { e: "🚴", patterns: ["fietsen", "fiets", "naar buiten"] },
+  { e: "🏊", patterns: ["zwemmen", "zwemles", "zwembad"] },
+  { e: "🐶", patterns: ["hond", "hond uitlaten", "huisdier verzorgen", "voer geven"] },
+  { e: "🐱", patterns: ["kat", "kat voeren", "kattenbak"] },
+  { e: "🌱", patterns: ["plant water", "plantjes", "tuin", "water geven"] },
+  { e: "🛒", patterns: ["boodschappen", "winkel", "supermarkt"] },
+  { e: "⏰", patterns: ["op tijd", "wekker", "klaarmaken", "ochtendroutine"] },
+  { e: "🙏", patterns: ["helpen", "mama helpen", "papa helpen", "assisteren"] },
+  { e: "📅", patterns: ["weektaak", "deze week", "voor zondag", "voor het weekend"] },
+];
+
+function findRuleBasedTaskEmoji(title = "", desc = "", dayPart = "allDay") {
+  const source = normalizeEmojiSearchText(`${title} ${desc}`);
+  if (!source) return null;
+  let best = null;
+  TASK_EMOJI_RULES.forEach(rule => {
+    let score = 0;
+    rule.patterns.forEach(pattern => {
+      const p = normalizeEmojiSearchText(pattern);
+      if (!p) return;
+      if (source.includes(p)) score = Math.max(score, 100 + p.length);
+      else {
+        const words = p.split(" ").filter(Boolean);
+        const matched = words.filter(w => source.includes(w)).length;
+        if (matched === words.length && words.length > 0) score = Math.max(score, 70 + words.join("").length);
+        else if (matched > 0) score = Math.max(score, matched * 10);
+      }
+    });
+    if (!best || score > best.score) best = { emoji: rule.e, score };
+  });
+  if (best && best.score >= 30) return best.emoji;
+  return null;
+}
+
 function searchEmojis(query) {
   if (!query || query.trim().length < 1) return ALL_EMOJIS.slice(0, 30);
-  const q = query.toLowerCase().trim();
-  const words = q.split(/\s+/);
+  const q = normalizeEmojiSearchText(query);
+  const words = q.split(/\s+/).filter(Boolean);
   const scored = EMOJI_DB.map(item => {
+    const tags = normalizeEmojiSearchText(item.t);
     let score = 0;
     words.forEach(w => {
-      if (item.t.includes(w)) score += w.length > 3 ? 3 : 1;
+      if (!w) return;
+      if (tags.includes(` ${w} `) || tags.startsWith(`${w} `) || tags.endsWith(` ${w}`) || tags === w) score += w.length > 3 ? 7 : 3;
+      else if (tags.includes(w)) score += w.length > 4 ? 3 : 1;
     });
+    if (q && tags.includes(q)) score += 12;
     return { ...item, score };
   }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
-  // always show some emojis even with no match
   if (scored.length === 0) return ALL_EMOJIS.slice(0, 30);
-  return scored.map(x => x.e);
+  return [...new Set(scored.map(x => x.e))];
 }
 
 function getAutoTaskEmoji(title = "", desc = "", dayPart = "allDay") {
+  const ruleEmoji = findRuleBasedTaskEmoji(title, desc, dayPart);
+  if (ruleEmoji) return ruleEmoji;
   const query = `${title} ${desc}`.trim();
   const matches = searchEmojis(query);
   if (matches.length && query) return matches[0];
