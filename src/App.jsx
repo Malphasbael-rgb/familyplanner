@@ -2858,7 +2858,7 @@ export default function App() {
               <button className="back-btn" onClick={goHome}>← Terug</button>
             </header>
             <main className="main">
-              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} />
+              <ParentView data={data} db={db} tab={tab} setTab={setTab} setModal={setModal} parentPin={parentPin} getLifetimeCoinsForChild={getLifetimeCoinsForChild} />
             </main>
           </>
         )}
@@ -3632,7 +3632,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
 
-function ParentDashboard({ data, db, setModal, setTab }) {
+function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild }) {
   const todayNow = getTodayISO();
   const now = new Date();
   const pendingApprovals = data.tasks.filter(t => t.status === "done");
@@ -3857,7 +3857,7 @@ function ParentDashboard({ data, db, setModal, setTab }) {
   );
 }
 
-function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
+function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoinsForChild }) {
   const pending             = data.tasks.filter(t => t.status === "done");
   const pendingRedemptions  = data.redemptions.filter(r => r.status === "pending");
   const getChild = (id) => data.children.find(c => c.id === id);
@@ -3872,7 +3872,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin }) {
   return (
     <div className={tab === "dashboard" ? "" : "parent-quiet"}>
       {tab === "dashboard" ? (
-        <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} />
+        <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} getLifetimeCoinsForChild={getLifetimeCoinsForChild} />
       ) : (
         <div style={{ ...headerPanel, marginBottom: 18 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
