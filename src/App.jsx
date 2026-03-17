@@ -221,6 +221,26 @@ function saveLifetimeCoins(map) {
   } catch {}
 }
 
+function getStoredLastBadgeMap() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LAST_BADGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setStoredLastBadge(childId, badgeId) {
+  const next = { ...getStoredLastBadgeMap() };
+  if (!childId) return next;
+  if (badgeId) next[childId] = badgeId;
+  else delete next[childId];
+  try {
+    localStorage.setItem(LAST_BADGE_KEY, JSON.stringify(next));
+  } catch {}
+  return next;
+}
+
 function getChildLifetimeCoinsValue(child, lifetimeMap = {}) {
   if (!child) return 0;
   const raw = lifetimeMap?.[child.id];
