@@ -364,9 +364,26 @@ function getTemplateOccurrenceTask(templateTask, allTasks = [], referenceDate = 
   });
   if (!linked.length) return null;
 
+  const statusRank = { approved: 3, done: 2, pending: 1 };
+  const pickBest = (tasks = []) => {
+    if (!tasks.length) return null;
+    return [...tasks].sort((a, b) => {
+      const aStatus = getEffectiveTaskStatus(a);
+      const bStatus = getEffectiveTaskStatus(b);
+      const rankDiff = (statusRank[bStatus] || 0) - (statusRank[aStatus] || 0);
+      if (rankDiff !== 0) return rankDiff;
+      const approvedDiff = String(parseTaskDesc(b.desc, b.coins).approvedOn || '').localeCompare(String(parseTaskDesc(a.desc, a.coins).approvedOn || ''));
+      if (approvedDiff !== 0) return approvedDiff;
+      const doneDiff = String(parseTaskDesc(b.desc, b.coins).doneOn || '').localeCompare(String(parseTaskDesc(a.desc, a.coins).doneOn || ''));
+      if (doneDiff !== 0) return doneDiff;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    })[0];
+  };
+
   const occurrenceDate = getRecurringOccurrenceDate(templateTask, referenceDate);
   if (occurrenceDate) {
-    const exact = linked.find((task) => task.date === occurrenceDate);
+    const exactMatches = linked.filter((task) => task.date === occurrenceDate);
+    const exact = pickBest(exactMatches);
     if (exact) return exact;
   }
 
@@ -379,6 +396,10 @@ function getTemplateOccurrenceTask(templateTask, allTasks = [], referenceDate = 
     .filter((entry) => entry.distance <= 86400000)
     .sort((a, b) => {
       if (a.distance !== b.distance) return a.distance - b.distance;
+      const aStatus = getEffectiveTaskStatus(a.task);
+      const bStatus = getEffectiveTaskStatus(b.task);
+      const rankDiff = (statusRank[bStatus] || 0) - (statusRank[aStatus] || 0);
+      if (rankDiff !== 0) return rankDiff;
       return String(b.task.date || '').localeCompare(String(a.task.date || ''));
     });
 
