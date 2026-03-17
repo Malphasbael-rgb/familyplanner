@@ -4332,6 +4332,8 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         boxShadow: `0 2px 12px ${th.pri}18`,
         alignItems: "stretch",
         minHeight: 108,
+        paddingTop: 10,
+        paddingBottom: 10,
       }}
     >
       {showSlay && <div className="slay-popup">💅 Slay Girl! ✨</div>}
@@ -4339,55 +4341,83 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         className={`kc ${done || appr ? "kcd" : ""}`}
         onClick={handleCheck}
         style={{
-          background:   done || appr ? th.pri : "#fff",
-          borderColor:  done || appr ? th.pri : th.pri + "66",
+          background: done || appr ? th.pri : "#fff",
+          borderColor: done || appr ? th.pri : th.pri + "66",
           color: "#fff",
-          fontSize: 20,
+          width: 54,
+          minWidth: 54,
+          height: 54,
+          borderRadius: 18,
+          fontSize: 28,
+          fontWeight: 900,
           alignSelf: "center",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: `0 6px 16px ${th.pri}22`,
         }}
       >
         {(done || appr) ? "✓" : ""}
       </div>
       <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%", minWidth: 0 }}>
           <div
             aria-hidden="true"
             style={{
-              width: 56,
-              minWidth: 56,
-              height: 56,
-              borderRadius: 16,
+              width: 72,
+              minWidth: 72,
+              height: 72,
+              borderRadius: 20,
               background: appr || done ? th.badgeBg || `${th.pri}22` : `${th.pri}14`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 32,
+              fontSize: 42,
               lineHeight: 1,
               boxShadow: `inset 0 1px 0 rgba(255,255,255,.55), 0 6px 14px ${th.pri}18`,
             }}
           >
             {taskEmoji}
           </div>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
-            <div style={{ fontWeight: 900, fontSize: 19, lineHeight: 1.15, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340", wordBreak: "break-word" }}>{task.title}</div>
-            {taskMeta.visibleDesc && <div style={{ fontSize: 13.5, color: "var(--t2)", marginTop: 4, lineHeight: 1.28, wordBreak: "break-word" }}>{taskMeta.visibleDesc}</div>}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0, minHeight: 72 }}>
+            <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1.12, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340", wordBreak: "break-word" }}>{task.title}</div>
+            {taskMeta.visibleDesc && <div style={{ fontSize: 15, color: "var(--t2)", marginTop: 5, lineHeight: 1.3, wordBreak: "break-word" }}>{taskMeta.visibleDesc}</div>}
             {!done && !appr && (
-              <div style={{ fontSize: 11.5, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>
+              <div style={{ fontSize: 12.5, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>
                 📅 Startdatum {task.date} · {getDayPartConfig(taskMeta.dayPart).emoji} {dayPartLabel} · {daysLeft === 1 ? "⚠️ Laatste dag" : `⏳ Nog ${daysLeft} dag${daysLeft === 1 ? "" : "en"} over`}
               </div>
             )}
             {isMissed && !done && !appr && (
-              <div style={{ fontSize: 11.5, color: "#b45309", fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>
+              <div style={{ fontSize: 12.5, color: "#b45309", fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>
                 ⏰ Gemist sinds {task.date} · {taskMeta.baseDecay} coin{taskMeta.baseDecay === 1 ? "" : "s"} verval per gemiste dag
                 {taskMeta.lastDecay !== taskMeta.baseDecay ? ` · laatste verval ${taskMeta.lastDecay}` : ""}
               </div>
             )}
-            {done && taskMeta.requiresParentApproval && <div style={{ fontSize: 11.5, color: "#d97706", fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>⏳ Wacht op goedkeuring van ouder</div>}
-            {appr && <div style={{ fontSize: 11.5, color: th.pri, fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>{taskMeta.requiresParentApproval ? "✅ Goedgekeurd! Coins ontvangen!" : "✅ Meteen afgerond! Coins ontvangen!"}</div>}
+            {done && taskMeta.requiresParentApproval && <div style={{ fontSize: 12.5, color: "#d97706", fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>⏳ Wacht op goedkeuring van ouder</div>}
+            {appr && <div style={{ fontSize: 12.5, color: th.pri, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>{taskMeta.requiresParentApproval ? "✅ Goedgekeurd! Coins ontvangen!" : "✅ Meteen afgerond! Coins ontvangen!"}</div>}
           </div>
         </div>
       </div>
-      <div style={{ fontWeight: 900, color: "var(--yel)", fontSize: 21, display: "flex", alignItems: "center", gap: 3, alignSelf: "center", whiteSpace: "nowrap" }}>🪙{currentCoins}</div>
+      <div
+        style={{
+          alignSelf: "center",
+          minWidth: 72,
+          height: 72,
+          borderRadius: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          padding: "0 10px",
+          background: `${th.yel || "#fbbf24"}18`,
+          border: `1px solid ${(th.yel || "#fbbf24")}44`,
+          boxShadow: `0 6px 16px ${(th.yel || "#fbbf24")}20`,
+          whiteSpace: "nowrap",
+        }}
+      >
+        <span style={{ fontSize: 34, lineHeight: 1 }}>🪙</span>
+        <span style={{ fontWeight: 900, color: "var(--yel)", fontSize: 30, lineHeight: 1 }}>{currentCoins}</span>
+      </div>
     </div>
   );
 }
