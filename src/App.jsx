@@ -1342,6 +1342,250 @@ function getCountdownInfoForChild(child, childBirthDatesMap = {}, childCountdown
   };
 }
 
+
+const BADGE_DEFS = [
+  {
+    id: "poetskampioen",
+    name: "Poetskampioen",
+    shortName: "Poetskampioen",
+    hint: "10 keer tanden poetsen afgerond",
+    goal: 10,
+    icon: "🪥",
+    ring: "linear-gradient(135deg,#38bdf8,#6366f1)",
+    glow: "rgba(56,189,248,0.30)",
+    track: ({ approvedTasks }) => countApprovedTasksByKeywords(approvedTasks, ["tanden poets", "poetsen", "tooth brush", "brush teeth"]),
+  },
+  {
+    id: "zelfdoener",
+    name: "Zelfdoener",
+    shortName: "Zelfdoener",
+    hint: "10 keer zelf aankleden",
+    goal: 10,
+    icon: "👕",
+    ring: "linear-gradient(135deg,#8b5cf6,#ec4899)",
+    glow: "rgba(236,72,153,0.28)",
+    track: ({ approvedTasks }) => countApprovedTasksByKeywords(approvedTasks, ["zelf aankleden", "aankleden", "omkleden", "kleren aan"]),
+  },
+  {
+    id: "opruimpro",
+    name: "Opruimpro",
+    shortName: "Opruimpro",
+    hint: "10 opruimtaken afgerond",
+    goal: 10,
+    icon: "📦",
+    ring: "linear-gradient(135deg,#f59e0b,#ef4444)",
+    glow: "rgba(245,158,11,0.28)",
+    track: ({ approvedTasks }) => countApprovedTasksByKeywords(approvedTasks, ["opruim", "netjes", "kamer", "speelgoed", "afruimen"]),
+  },
+  {
+    id: "boekenwurm",
+    name: "Boekenwurm",
+    shortName: "Boekenwurm",
+    hint: "5 leestaken afgerond",
+    goal: 5,
+    icon: "📚",
+    ring: "linear-gradient(135deg,#7c3aed,#4f46e5)",
+    glow: "rgba(124,58,237,0.26)",
+    track: ({ approvedTasks }) => countApprovedTasksByKeywords(approvedTasks, ["lezen", "boek", "voorlezen", "reading"]),
+  },
+  {
+    id: "doorzetter",
+    name: "Doorzetter",
+    shortName: "Doorzetter",
+    hint: "3 dagen op rij minstens 1 taak goedgekeurd",
+    goal: 3,
+    icon: "🔥",
+    ring: "linear-gradient(135deg,#8b5cf6,#3b82f6)",
+    glow: "rgba(59,130,246,0.28)",
+    track: ({ streak }) => streak,
+  },
+  {
+    id: "weekheld",
+    name: "Weekheld",
+    shortName: "Weekheld",
+    hint: "7 dagen streak",
+    goal: 7,
+    icon: "⚡",
+    ring: "linear-gradient(135deg,#06b6d4,#2563eb)",
+    glow: "rgba(6,182,212,0.28)",
+    track: ({ streak }) => streak,
+  },
+  {
+    id: "coin-starter",
+    name: "Coin Starter",
+    shortName: "Coin Starter",
+    hint: "50 lifetime coins verdiend",
+    goal: 50,
+    icon: "🪙",
+    ring: "linear-gradient(135deg,#facc15,#f97316)",
+    glow: "rgba(250,204,21,0.28)",
+    track: ({ lifetimeCoins }) => lifetimeCoins,
+  },
+  {
+    id: "level-5-held",
+    name: "Level 5 Held",
+    shortName: "Level 5 Held",
+    hint: "Bereik level 5",
+    goal: 5,
+    icon: "👑",
+    ring: "linear-gradient(135deg,#f59e0b,#a855f7)",
+    glow: "rgba(245,158,11,0.28)",
+    track: ({ level }) => level,
+  },
+  {
+    id: "beloningsbaas",
+    name: "Beloningsbaas",
+    shortName: "Beloningsbaas",
+    hint: "Eerste beloning ingewisseld",
+    goal: 1,
+    icon: "🎁",
+    ring: "linear-gradient(135deg,#c084fc,#ec4899)",
+    glow: "rgba(192,132,252,0.28)",
+    track: ({ approvedRewardCount }) => approvedRewardCount,
+  },
+  {
+    id: "bijna-jarig",
+    name: "Bijna Jarig",
+    shortName: "Bijna Jarig",
+    hint: "Nog 7 dagen of minder tot verjaardag",
+    goal: 7,
+    icon: "📅",
+    ring: "linear-gradient(135deg,#22c55e,#3b82f6)",
+    glow: "rgba(59,130,246,0.24)",
+    progressMode: "reverse",
+    track: ({ birthdayDays }) => birthdayDays,
+  },
+  {
+    id: "alles-klaar",
+    name: "Alles Klaar",
+    shortName: "Alles Klaar",
+    hint: "Alle taken van vandaag afgerond",
+    goal: 1,
+    icon: "✅",
+    ring: "linear-gradient(135deg,#8b5cf6,#ec4899)",
+    glow: "rgba(236,72,153,0.28)",
+    track: ({ allDoneToday }) => allDoneToday ? 1 : 0,
+  },
+];
+
+function getTaskAnchorDate(task) {
+  const info = parseTaskDesc(task?.desc, task?.coins);
+  return info.approvedOn || info.doneOn || task?.date || null;
+}
+
+function getApprovedTasksForChild(allTasks = [], childId) {
+  return dedupeVisibleTasks((allTasks || []).filter(task => {
+    if (!task || task.childId !== childId) return false;
+    if (isRecurringTemplateTask(task)) return false;
+    return getEffectiveTaskStatus(task) === "approved";
+  }));
+}
+
+function countApprovedTasksByKeywords(tasks = [], keywords = []) {
+  const needles = keywords.map(k => normalizeName(k)).filter(Boolean);
+  return tasks.filter(task => {
+    const hay = normalizeName(`${task?.title || ""} ${parseTaskDesc(task?.desc, task?.coins).visibleDesc || ""}`);
+    return needles.some(needle => hay.includes(needle));
+  }).length;
+}
+
+function getApprovedDayStreak(tasks = [], referenceDate = getTodayISO()) {
+  const daySet = new Set(tasks.map(getTaskAnchorDate).filter(Boolean));
+  let streak = 0;
+  let cursor = new Date(`${referenceDate}T00:00:00`);
+  while (true) {
+    const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+    if (!daySet.has(iso)) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function getApprovedRewardCount(redemptions = [], childId) {
+  return (redemptions || []).filter(r => r?.childId === childId && r?.status === "approved" && !isPenaltyRedemption(r)).length;
+}
+
+function getChildBadgeState({ child, data, lifetimeCoins = 0, childBirthDatesMap = {}, childCountdownsMap = {}, referenceDate = getTodayISO(), todayActiveTasks = null, todayDoneCount = null }) {
+  if (!child) return { earnedCount: 0, totalCount: BADGE_DEFS.length, streak: 0, badges: [] };
+  const approvedTasks = getApprovedTasksForChild(data?.tasks || [], child.id);
+  const streak = getApprovedDayStreak(approvedTasks, referenceDate);
+  const approvedRewardCount = getApprovedRewardCount(data?.redemptions || [], child.id);
+  const level = getLevelInfo(lifetimeCoins).level;
+  const countdownInfo = getCountdownInfoForChild(child, childBirthDatesMap, childCountdownsMap, referenceDate);
+  const birthdayDays = countdownInfo && /verjaardag/i.test(String(countdownInfo.title || "")) ? countdownInfo.days : Number.POSITIVE_INFINITY;
+  const visibleTodayTasks = Array.isArray(todayActiveTasks)
+    ? todayActiveTasks
+    : dedupeVisibleTasks((data?.tasks || []).filter(t => {
+        if (!t || t.childId !== child.id) return false;
+        if (isRecurringTemplateTask(t)) return false;
+        if (t.date > referenceDate) return false;
+        if (getTaskRemainingCoins(t, referenceDate) <= 0) return false;
+        if (!shouldKeepCompletedVisible(t, referenceDate)) return false;
+        return t.status !== "pending" || isTaskVisibleForChildNow(t);
+      }));
+  const doneToday = Number.isFinite(Number(todayDoneCount)) ? Number(todayDoneCount) : visibleTodayTasks.filter(t => getEffectiveTaskStatus(t) !== "pending").length;
+  const allDoneToday = visibleTodayTasks.length > 0 && doneToday >= visibleTodayTasks.length;
+
+  const context = { approvedTasks, streak, lifetimeCoins, level, approvedRewardCount, birthdayDays, allDoneToday };
+  const badges = BADGE_DEFS.map((badge) => {
+    const rawValue = Number(badge.track(context) || 0);
+    const earned = badge.progressMode === "reverse" ? rawValue <= badge.goal : rawValue >= badge.goal;
+    const progress = badge.progressMode === "reverse"
+      ? (Number.isFinite(rawValue) ? Math.max(0, Math.min(1, (badge.goal - rawValue + 1) / badge.goal)) : 0)
+      : Math.max(0, Math.min(1, rawValue / badge.goal));
+    let progressText = earned ? "Vrijgespeeld" : `${Math.min(rawValue, badge.goal)}/${badge.goal}`;
+    if (badge.id === "bijna-jarig") progressText = earned ? `Nog ${Math.max(0, rawValue)} dagen` : (Number.isFinite(rawValue) ? `Nog ${rawValue} dagen` : "Nog geen verjaardag ingesteld");
+    if (badge.id === "alles-klaar") progressText = earned ? "Vandaag compleet" : `${doneToday}/${visibleTodayTasks.length || 1} klaar`;
+    if (badge.id === "level-5-held") progressText = earned ? `Level ${level}` : `Level ${level}/5`;
+    return { ...badge, value: rawValue, earned, progress, progressText };
+  });
+  return {
+    earnedCount: badges.filter(b => b.earned).length,
+    totalCount: badges.length,
+    streak,
+    badges,
+  };
+}
+
+function BadgeShowcase({ badges = [], theme = DEFAULT_THEME, compact = false, title = "Badgekast", subtitle = "" }) {
+  return (
+    <div style={{ background: "#fff", border: `2px solid ${theme.pri}26`, borderRadius: 22, padding: compact ? 14 : 16, boxShadow: `0 8px 24px ${theme.pri}12` }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginBottom: compact ? 10 : 14, flexWrap:'wrap' }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: compact ? 16 : 18, color: theme.priD }}>🏵️ {title}</div>
+          {subtitle ? <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 3 }}>{subtitle}</div> : null}
+        </div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns: compact ? 'repeat(auto-fit, minmax(120px, 1fr))' : 'repeat(auto-fit, minmax(150px, 1fr))', gap: compact ? 10 : 12 }}>
+        {badges.map((badge) => (
+          <div key={badge.id} style={{
+            position:'relative',
+            overflow:'hidden',
+            borderRadius: 20,
+            padding: compact ? '12px 10px' : '14px 12px',
+            background: badge.earned ? 'linear-gradient(180deg,#ffffff,#fff7ff)' : 'linear-gradient(180deg,#f8fafc,#eef2f7)',
+            border: badge.earned ? `2px solid ${theme.pri}40` : '2px solid rgba(148,163,184,0.18)',
+            boxShadow: badge.earned ? `0 12px 28px ${badge.glow}` : '0 6px 18px rgba(15,23,42,0.08)',
+            opacity: badge.earned ? 1 : 0.78,
+          }}>
+            <div style={{ width: compact ? 58 : 68, height: compact ? 58 : 68, margin:'0 auto 10px', borderRadius:'50%', background: badge.ring, display:'grid', placeItems:'center', boxShadow:`0 10px 24px ${badge.glow}, inset 0 0 0 3px rgba(255,255,255,0.55)` }}>
+              <span style={{ fontSize: compact ? 28 : 34 }}>{badge.icon}</span>
+            </div>
+            <div style={{ textAlign:'center', fontWeight:900, color: badge.earned ? theme.priD : '#475569', fontSize: compact ? 13 : 14, lineHeight:1.2 }}>{badge.shortName}</div>
+            <div style={{ textAlign:'center', fontSize: 11, color:'#64748b', minHeight: compact ? 28 : 34, marginTop: 6, lineHeight:1.25 }}>{badge.hint}</div>
+            <div style={{ marginTop: 10, height: 8, borderRadius:999, background:'rgba(148,163,184,0.16)', overflow:'hidden' }}>
+              <div style={{ width: `${Math.max(6, Math.round(badge.progress * 100))}%`, height:'100%', borderRadius:999, background: badge.ring }} />
+            </div>
+            <div style={{ marginTop: 7, textAlign:'center', fontSize: 11, fontWeight:800, color: badge.earned ? '#15803d' : '#64748b' }}>{badge.progressText}</div>
+            {badge.earned ? <div style={{ position:'absolute', top:10, right:10, fontSize: 16 }}>✨</div> : <div style={{ position:'absolute', top:10, right:10, fontSize: 14, opacity:.5 }}>🔒</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function searchEmojis(query) {
   if (!query || query.trim().length < 1) return ALL_EMOJIS.slice(0, 30);
   const q = normalizeEmojiSearchText(query);
@@ -3536,8 +3780,11 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
 
   const [feitje]  = useState(() => FEITJES[Math.floor(Math.random() * FEITJES.length)]);
   const [coinPop, setCoinPop] = useState(false);
+  const [badgeUnlockQueue, setBadgeUnlockQueue] = useState([]);
+  const [activeBadgeUnlock, setActiveBadgeUnlock] = useState(null);
   const prevCoins    = useRef(cur?.coins ?? 0);
   const prevDoneCount = useRef(doneCount);
+  const prevEarnedBadgeIds = useRef([]);
   const celebFired   = useRef(false);
 
   const d = new Date();
@@ -3572,14 +3819,75 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   useEffect(() => {
     celebFired.current = false;
     prevDoneCount.current = doneCount;
+    prevEarnedBadgeIds.current = [];
+    setBadgeUnlockQueue([]);
+    setActiveBadgeUnlock(null);
   }, [activeKid]);
 
   if (!cur) return null;
   const th = getChildTheme(cur);
   const levelInfo = getLevelInfo(getLifetimeCoinsForChild(cur));
+  const badgeState = getChildBadgeState({
+    child: cur,
+    data,
+    lifetimeCoins: getLifetimeCoinsForChild(cur),
+    childBirthDatesMap,
+    childCountdownsMap,
+    referenceDate: todayNow,
+    todayActiveTasks: activeTasks,
+    todayDoneCount: doneCount,
+  });
+  const earnedBadges = badgeState.badges.filter(b => b.earned);
+  const earnedBadgeIdsKey = earnedBadges.map(b => b.id).sort().join('|');
+
+  useEffect(() => {
+    const prev = prevEarnedBadgeIds.current;
+    if (prev.length > 0) {
+      const newlyUnlocked = earnedBadges.filter(b => !prev.includes(b.id));
+      if (newlyUnlocked.length) {
+        setBadgeUnlockQueue(queue => [...queue, ...newlyUnlocked]);
+      }
+    }
+    prevEarnedBadgeIds.current = earnedBadges.map(b => b.id);
+  }, [earnedBadgeIdsKey]);
+
+  useEffect(() => {
+    if (!activeBadgeUnlock && badgeUnlockQueue.length > 0) {
+      const [nextBadge, ...rest] = badgeUnlockQueue;
+      setActiveBadgeUnlock(nextBadge);
+      setBadgeUnlockQueue(rest);
+    }
+  }, [badgeUnlockQueue, activeBadgeUnlock]);
+
+  useEffect(() => {
+    if (!activeBadgeUnlock) return;
+    const timer = setTimeout(() => setActiveBadgeUnlock(null), 2600);
+    return () => clearTimeout(timer);
+  }, [activeBadgeUnlock]);
 
   return (
-    <div style={{ background: th.bg, minHeight: "100vh", margin: "-24px -20px", padding: "24px 20px" }}>
+    <div style={{ background: th.bg, minHeight: "100vh", margin: "-24px -20px", padding: "24px 20px", position:'relative' }}>
+
+      {activeBadgeUnlock && (
+        <div style={{ position:'fixed', inset:0, zIndex:9998, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(15,23,42,0.22)', backdropFilter:'blur(4px)', animation:'feestFadeIn .22s ease' }} />
+          <div style={{ position:'relative', zIndex:2, width:'min(92vw, 420px)', borderRadius:32, padding:'24px 24px 22px', background:'linear-gradient(135deg, rgba(255,255,255,.98), rgba(255,247,255,.96))', boxShadow:`0 28px 90px ${activeBadgeUnlock.glow}, 0 0 0 3px ${th.pri}22`, border:`2px solid ${th.pri}30`, textAlign:'center', animation:'feestCardIn .42s cubic-bezier(.34,1.56,.64,1) both', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', top:12, left:18, fontSize:24, animation:'feestBounce 1s ease infinite alternate' }}>✨</div>
+            <div style={{ position:'absolute', top:14, right:18, fontSize:22, animation:'feestBounce .9s ease infinite alternate' }}>🏵️</div>
+            <div style={{ margin:'0 auto 14px', width:104, height:104, borderRadius:'50%', display:'grid', placeItems:'center', background:activeBadgeUnlock.ring, boxShadow:`0 18px 46px ${activeBadgeUnlock.glow}, inset 0 0 0 5px rgba(255,255,255,.5)`, animation:'checkPop .62s ease' }}>
+              <span style={{ fontSize:52, filter:'drop-shadow(0 4px 12px rgba(255,255,255,.35))' }}>{activeBadgeUnlock.icon}</span>
+            </div>
+            <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:17, fontWeight:900, color:th.pri, letterSpacing:'.04em', textTransform:'uppercase' }}>Nieuwe badge!</div>
+            <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:30, lineHeight:1.05, fontWeight:800, color:th.priD, marginTop:4 }}>{activeBadgeUnlock.name}</div>
+            <div style={{ fontSize:15, lineHeight:1.45, color:'#475569', marginTop:10 }}>{activeBadgeUnlock.hint}</div>
+            <div style={{ marginTop:14, display:'inline-flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:999, background:`${th.pri}14`, color:th.priD, fontSize:13, fontWeight:900, border:`1px solid ${th.pri}2f` }}>+1 badge vrijgespeeld</div>
+            <div style={{ marginTop:16, display:'flex', justifyContent:'center', gap:10, flexWrap:'wrap' }}>
+              <button className="btn" style={{ background: th.hdr, boxShadow: th.hdrShadow, minWidth: 150 }} onClick={() => { setKidTab('badges'); setActiveBadgeUnlock(null); }}>Bekijk badges</button>
+              <button className="btn sec" style={{ minWidth: 110 }} onClick={() => setActiveBadgeUnlock(null)}>Top!</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Deco strip */}
       <div className="kid-deco-strip">
@@ -3688,6 +3996,9 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
         <button className={`tab ${kidTab === "missed" ? "on" : ""}`}
           style={kidTab === "missed" ? { color: th.pri } : {}}
           onClick={() => setKidTab("missed")}>⏰ Gemist{missedTasks.length ? ` (${missedTasks.length})` : ""}</button>
+        <button className={`tab ${kidTab === "badges" ? "on" : ""}`}
+          style={kidTab === "badges" ? { color: th.pri } : {}}
+          onClick={() => setKidTab("badges")}>🏵️ Badges ({badgeState.earnedCount})</button>
         <button className={`tab ${kidTab === "purchases" ? "on" : ""}`}
           style={kidTab === "purchases" ? { color: th.pri } : {}}
           onClick={() => setKidTab("purchases")}>📜 Geschiedenis</button>
@@ -3738,6 +4049,22 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
                 <KidTask key={t.id} task={t} db={db} playTaskDone={playTaskDone} childName={cur.name} theme={th} isMissed />
               ))
           }
+        </div>
+      )}
+
+      {kidTab === "badges" && (
+        <div>
+          <div className="st" style={{ marginBottom: 10, color: th.priD }}>Badgekast 🏵️</div>
+          <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>
+            Je hebt <strong style={{ color: th.pri }}>{badgeState.earnedCount}</strong> van de <strong>{badgeState.totalCount}</strong> badges vrijgespeeld.
+            Huidige streak: <strong style={{ color: th.priD }}>{badgeState.streak}</strong> dag{badgeState.streak === 1 ? "" : "en"}.
+          </div>
+          <BadgeShowcase
+            badges={badgeState.badges}
+            theme={th}
+            title="Jouw badges"
+            subtitle="Verdien badges door streaks, coins en slimme gewoontes."
+          />
         </div>
       )}
 
@@ -3889,7 +4216,7 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
 
 // ─── PARENT VIEW ───────────────────────────────────────────────────────────────
 
-function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild }) {
+function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild, childBirthDatesMap, childCountdownsMap }) {
   const todayNow = getTodayISO();
   const now = new Date();
   const pendingRedemptions = data.redemptions.filter(r => r.status === "pending" && !isPenaltyRedemption(r));
@@ -3967,7 +4294,8 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
       ? { glow:'rgba(56,189,248,0.34)', border:'rgba(59,130,246,0.45)', accent:'#60a5fa', accent2:'#93c5fd', badgeBg:'rgba(59,130,246,0.14)' }
       : { glow:'rgba(244,114,182,0.30)', border:'rgba(236,72,153,0.42)', accent:'#f472b6', accent2:'#f9a8d4', badgeBg:'rgba(236,72,153,0.13)' };
     const progressWidth = `${Math.max(8, Math.round(level.progress * 100))}%`;
-    return { child, life, level, activeTasks, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth };
+    const badgeState = getChildBadgeState({ child, data, lifetimeCoins: life, childBirthDatesMap, childCountdownsMap, referenceDate: todayNow, todayActiveTasks: activeTasks, todayDoneCount: activeTasks.filter(t => getEffectiveTaskStatus(t) !== 'pending').length });
+    return { child, life, level, activeTasks, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth, badgeState };
   });
 
   const attentionItems = [];
@@ -4007,7 +4335,7 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:18, marginBottom:18 }}>
-        {childCards.map(({ child, life, level, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth }) => (
+        {childCards.map(({ child, life, level, openTasks, approvals, weeklyDone, weeklyCoins, theme, progressWidth, badgeState }) => (
           <div key={child.id} style={{ ...panel, padding:18, border:`1px solid ${theme.border}`, boxShadow:`0 0 0 1px ${theme.border} inset, 0 0 24px ${theme.glow}` }}>
             <div style={{ display:'flex', justifyContent:'space-between', gap:16, alignItems:'center', marginBottom:12 }}>
               <div style={{ display:'flex', alignItems:'center', gap:14 }}>
@@ -4043,6 +4371,21 @@ function ParentDashboard({ data, db, setModal, setTab, getLifetimeCoinsForChild 
                   <div style={{ fontWeight:900, fontSize:26, color:stat.tone }}>{stat.value}</div>
                 </div>
               ))}
+            </div>
+            <div style={{ marginTop: 14, padding:'12px 14px', borderRadius:18, background:'rgba(15,23,42,0.44)', border:'1px solid rgba(148,163,184,0.14)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:10, marginBottom:10, flexWrap:'wrap' }}>
+                <div style={{ fontWeight:900, color:'#e9d5ff' }}>🏵️ Badges</div>
+                <div style={{ fontSize:12, color:'rgba(226,232,240,0.8)' }}>{badgeState.earnedCount}/{badgeState.totalCount} vrijgespeeld</div>
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                {badgeState.badges.filter(b => b.earned).slice(0, 4).map(badge => (
+                  <div key={badge.id} style={{ padding:'8px 10px', borderRadius:999, background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', display:'flex', alignItems:'center', gap:8 }}>
+                    <span>{badge.icon}</span><span style={{ fontSize:12, fontWeight:800, color:'#f8fafc' }}>{badge.shortName}</span>
+                  </div>
+                ))}
+                {!badgeState.badges.some(b => b.earned) && <div style={{ fontSize:12, color:'rgba(226,232,240,0.78)' }}>Nog geen badges vrijgespeeld</div>}
+              </div>
+              <div style={{ marginTop:10, fontSize:12, color:'rgba(226,232,240,0.78)' }}>Streak: <strong style={{ color:'#fef08a' }}>{badgeState.streak}</strong> dag{badgeState.streak === 1 ? '' : 'en'}.</div>
             </div>
           </div>
         ))}
@@ -4144,7 +4487,7 @@ function ParentView({ data, db, tab, setTab, setModal, parentPin, getLifetimeCoi
   return (
     <div className={tab === "dashboard" ? "" : "parent-quiet"}>
       {tab === "dashboard" ? (
-        <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} getLifetimeCoinsForChild={getLifetimeCoinsForChild} />
+        <ParentDashboard data={data} db={db} setModal={setModal} setTab={setTab} getLifetimeCoinsForChild={getLifetimeCoinsForChild} childBirthDatesMap={childBirthDatesMap} childCountdownsMap={childCountdownsMap} />
       ) : (
         <div style={{ ...headerPanel, marginBottom: 18 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
