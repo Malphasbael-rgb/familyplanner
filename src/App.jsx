@@ -24,6 +24,7 @@ const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
 const COMPLETED_HISTORY_DAYS = 14;
 const LIFETIME_COINS_KEY = "familyplanner-lifetime-coins-v1";
 const LAST_BADGE_KEY = "familyplanner-last-earned-badges-v1";
+const BADGE_STATS_KEY = "familyplanner-badge-stats-v1";
 const LEVELS = [
   { level: 1, name: "Starter", min: 0 },
   { level: 2, name: "Helper", min: 100 },
@@ -36,6 +37,74 @@ const LEVELS = [
   { level: 9, name: "Legende", min: 2200 },
   { level: 10, name: "Ultieme Held", min: 2700 },
 ];
+
+function readJsonStorage(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  if (typeof window === "undefined") return value;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+  return value;
+}
+
+function getStoredLastBadgeMap() {
+  return readJsonStorage(LAST_BADGE_KEY, {});
+}
+
+function setStoredLastBadge(childId, badgeId) {
+  const current = getStoredLastBadgeMap();
+  const next = { ...current, [childId]: badgeId };
+  return writeJsonStorage(LAST_BADGE_KEY, next);
+}
+
+function getStoredBadgeStatsMap() {
+  return readJsonStorage(BADGE_STATS_KEY, {});
+}
+
+function ensureStoredBadgeEntries(childId, badgeIds = []) {
+  const current = getStoredBadgeStatsMap();
+  const childStats = { ...(current?.[childId] || {}) };
+  let changed = false;
+  badgeIds.filter(Boolean).forEach((badgeId) => {
+    if (!childStats[badgeId] || typeof childStats[badgeId] !== "object") {
+      childStats[badgeId] = { count: 1, lastEarnedAt: getTodayISO() };
+      changed = true;
+      return;
+    }
+    if (!Number.isFinite(Number(childStats[badgeId].count)) || Number(childStats[badgeId].count) < 1) {
+      childStats[badgeId] = { ...childStats[badgeId], count: 1, lastEarnedAt: childStats[badgeId].lastEarnedAt || getTodayISO() };
+      changed = true;
+    }
+  });
+  if (!changed) return current;
+  const next = { ...current, [childId]: childStats };
+  return writeJsonStorage(BADGE_STATS_KEY, next);
+}
+
+function incrementStoredBadgeCount(childId, badgeId) {
+  const current = getStoredBadgeStatsMap();
+  const childStats = { ...(current?.[childId] || {}) };
+  const prev = childStats[badgeId] || { count: 0 };
+  childStats[badgeId] = {
+    ...prev,
+    count: Math.max(0, Number(prev.count || 0)) + 1,
+    lastEarnedAt: getTodayISO(),
+  };
+  const next = { ...current, [childId]: childStats };
+  writeJsonStorage(BADGE_STATS_KEY, next);
+  return next;
+}
 
 const PARENT_THEME = {
   colors: {
@@ -219,26 +288,6 @@ function saveLifetimeCoins(map) {
   try {
     localStorage.setItem(LIFETIME_COINS_KEY, JSON.stringify(map || {}));
   } catch {}
-}
-
-function getStoredLastBadgeMap() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(LAST_BADGE_KEY) || "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function setStoredLastBadge(childId, badgeId) {
-  const next = { ...getStoredLastBadgeMap() };
-  if (!childId) return next;
-  if (badgeId) next[childId] = badgeId;
-  else delete next[childId];
-  try {
-    localStorage.setItem(LAST_BADGE_KEY, JSON.stringify(next));
-  } catch {}
-  return next;
 }
 
 function getChildLifetimeCoinsValue(child, lifetimeMap = {}) {
@@ -1510,6 +1559,26 @@ function countApprovedTasksByKeywords(tasks = [], keywords = []) {
   }).length;
 }
 
+function countApprovedDayRuns(tasks = [], minDays = 1) {
+  const safeMin = Math.max(1, Number(minDays || 1));
+  const uniqueDays = Array.from(new Set(tasks.map(getTaskAnchorDate).filter(Boolean))).sort();
+  if (!uniqueDays.length) return 0;
+  let count = 0;
+  let runLength = 1;
+  for (let i = 1; i < uniqueDays.length; i += 1) {
+    const prev = new Date(`${uniqueDays[i - 1]}T00:00:00`);
+    const cur = new Date(`${uniqueDays[i]}T00:00:00`);
+    const diff = Math.round((cur - prev) / 86400000);
+    if (diff === 1) runLength += 1;
+    else {
+      count += Math.floor(runLength / safeMin);
+      runLength = 1;
+    }
+  }
+  count += Math.floor(runLength / safeMin);
+  return count;
+}
+
 function getApprovedDayStreak(tasks = [], referenceDate = getTodayISO()) {
   const daySet = new Set(tasks.map(getTaskAnchorDate).filter(Boolean));
   let streak = 0;
@@ -1549,6 +1618,8 @@ function getChildBadgeState({ child, data, lifetimeCoins = 0, childBirthDatesMap
   const allDoneToday = visibleTodayTasks.length > 0 && doneToday >= visibleTodayTasks.length;
 
   const context = { approvedTasks, streak, lifetimeCoins, level, approvedRewardCount, birthdayDays, allDoneToday };
+  const streak3Count = countApprovedDayRuns(approvedTasks, 3);
+  const streak7Count = countApprovedDayRuns(approvedTasks, 7);
   const badges = BADGE_DEFS.map((badge) => {
     const rawValue = Number(badge.track(context) || 0);
     const earned = badge.progressMode === "reverse" ? rawValue <= badge.goal : rawValue >= badge.goal;
@@ -1559,7 +1630,19 @@ function getChildBadgeState({ child, data, lifetimeCoins = 0, childBirthDatesMap
     if (badge.id === "bijna-jarig") progressText = earned ? `Nog ${Math.max(0, rawValue)} dagen` : (Number.isFinite(rawValue) ? `Nog ${rawValue} dagen` : "Nog geen verjaardag ingesteld");
     if (badge.id === "alles-klaar") progressText = earned ? "Vandaag compleet" : `${doneToday}/${visibleTodayTasks.length || 1} klaar`;
     if (badge.id === "level-5-held") progressText = earned ? `Level ${level}` : `Level ${level}/5`;
-    return { ...badge, value: rawValue, earned, progress, progressText };
+    let repeatCount = earned ? 1 : 0;
+    if (badge.id === "poetskampioen") repeatCount = Math.floor(rawValue / 10);
+    if (badge.id === "zelfdoener") repeatCount = Math.floor(rawValue / 10);
+    if (badge.id === "opruimpro") repeatCount = Math.floor(rawValue / 10);
+    if (badge.id === "boekenwurm") repeatCount = Math.floor(rawValue / 5);
+    if (badge.id === "doorzetter") repeatCount = streak3Count;
+    if (badge.id === "weekheld") repeatCount = streak7Count;
+    if (badge.id === "coin-starter") repeatCount = Math.floor(lifetimeCoins / 50);
+    if (badge.id === "level-5-held") repeatCount = level >= 5 ? 1 + Math.floor((level - 5) / 5) : 0;
+    if (badge.id === "beloningsbaas") repeatCount = approvedRewardCount;
+    if (badge.id === "bijna-jarig") repeatCount = earned ? 1 : 0;
+    if (badge.id === "alles-klaar") repeatCount = allDoneToday ? 1 : 0;
+    return { ...badge, value: rawValue, earned, progress, progressText, repeatCount };
   });
   return {
     earnedCount: badges.filter(b => b.earned).length,
@@ -1569,7 +1652,7 @@ function getChildBadgeState({ child, data, lifetimeCoins = 0, childBirthDatesMap
   };
 }
 
-function BadgeShowcase({ badges = [], theme = DEFAULT_THEME, compact = false, title = "Badgekast", subtitle = "" }) {
+function BadgeShowcase({ badges = [], theme = DEFAULT_THEME, compact = false, title = "Badgekast", subtitle = "", badgeCounts = {} }) {
   return (
     <div style={{ background: "#fff", border: `2px solid ${theme.pri}26`, borderRadius: 22, padding: compact ? 14 : 16, boxShadow: `0 8px 24px ${theme.pri}12` }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginBottom: compact ? 10 : 14, flexWrap:'wrap' }}>
@@ -1579,7 +1662,9 @@ function BadgeShowcase({ badges = [], theme = DEFAULT_THEME, compact = false, ti
         </div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns: compact ? 'repeat(auto-fit, minmax(120px, 1fr))' : 'repeat(auto-fit, minmax(150px, 1fr))', gap: compact ? 10 : 12 }}>
-        {badges.map((badge) => (
+        {badges.map((badge) => {
+          const earnedCount = Math.max(0, Number(badge.count ?? badgeCounts?.[badge.id]?.count ?? 0));
+          return (
           <div key={badge.id} style={{
             position:'relative',
             overflow:'hidden',
@@ -1599,9 +1684,14 @@ function BadgeShowcase({ badges = [], theme = DEFAULT_THEME, compact = false, ti
               <div style={{ width: `${Math.max(6, Math.round(badge.progress * 100))}%`, height:'100%', borderRadius:999, background: badge.ring }} />
             </div>
             <div style={{ marginTop: 7, textAlign:'center', fontSize: 11, fontWeight:800, color: badge.earned ? '#15803d' : '#64748b' }}>{badge.progressText}</div>
+            <div style={{ marginTop: 8, display:'flex', justifyContent:'center' }}>
+              <div style={{ padding:'5px 9px', borderRadius:999, fontSize:11, fontWeight:900, letterSpacing:'.01em', background: badge.earned ? `${theme.pri}14` : 'rgba(148,163,184,0.12)', color: badge.earned ? theme.priD : '#64748b', border: badge.earned ? `1px solid ${theme.pri}2f` : '1px solid rgba(148,163,184,0.16)' }}>
+                {earnedCount > 0 ? `Behaald: ${earnedCount}x` : 'Nog niet behaald'}
+              </div>
+            </div>
             {badge.earned ? <div style={{ position:'absolute', top:10, right:10, fontSize: 16 }}>✨</div> : <div style={{ position:'absolute', top:10, right:10, fontSize: 14, opacity:.5 }}>🔒</div>}
           </div>
-        ))}
+        );})}
       </div>
     </div>
   );
@@ -3804,6 +3894,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const [badgeUnlockQueue, setBadgeUnlockQueue] = useState([]);
   const [activeBadgeUnlock, setActiveBadgeUnlock] = useState(null);
   const [lastBadgeMap, setLastBadgeMap] = useState(() => getStoredLastBadgeMap());
+  const [badgeStatsMap, setBadgeStatsMap] = useState(() => getStoredBadgeStatsMap());
   const prevCoins    = useRef(cur?.coins ?? 0);
   const prevDoneCount = useRef(doneCount);
   const prevEarnedBadgeIds = useRef([]);
@@ -3845,12 +3936,12 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     setBadgeUnlockQueue([]);
     setActiveBadgeUnlock(null);
     setLastBadgeMap(getStoredLastBadgeMap());
+    setBadgeStatsMap(getStoredBadgeStatsMap());
   }, [activeKid]);
 
-  const fallbackChild = cur || { id: activeKid, name: "", theme: "blue", avatar: "🧒", coins: 0 };
-  const th = getChildTheme(fallbackChild);
-  const levelInfo = getLevelInfo(cur ? getLifetimeCoinsForChild(cur) : 0);
-  const badgeState = cur ? getChildBadgeState({
+  const th = getChildTheme(cur);
+  const levelInfo = getLevelInfo(getLifetimeCoinsForChild(cur));
+  const badgeState = getChildBadgeState({
     child: cur,
     data,
     lifetimeCoins: getLifetimeCoinsForChild(cur),
@@ -3859,11 +3950,26 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     referenceDate: todayNow,
     todayActiveTasks: activeTasks,
     todayDoneCount: doneCount,
-  }) : { badges: [] };
-  const earnedBadges = badgeState.badges.filter(b => b.earned);
+  });
+  const childBadgeStats = badgeStatsMap?.[activeKid] || {};
+  const mergedBadges = badgeState.badges.map((badge) => ({
+    ...badge,
+    count: Math.max(
+      0,
+      Number(childBadgeStats?.[badge.id]?.count || 0),
+      Number(badge.repeatCount || 0)
+    ),
+  }));
+  const earnedBadges = mergedBadges.filter(b => b.earned);
   const earnedBadgeIdsKey = earnedBadges.map(b => b.id).sort().join('|');
   const storedLastBadgeId = lastBadgeMap?.[activeKid];
   const latestBadge = earnedBadges.find(b => b.id === storedLastBadgeId) || earnedBadges[earnedBadges.length - 1] || null;
+
+  useEffect(() => {
+    if (!activeKid) return;
+    const ensured = ensureStoredBadgeEntries(activeKid, earnedBadges.map(b => b.id));
+    setBadgeStatsMap(ensured);
+  }, [activeKid, earnedBadgeIdsKey]);
 
   useEffect(() => {
     const prev = prevEarnedBadgeIds.current;
@@ -3872,11 +3978,16 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
       if (newlyUnlocked.length) {
         const latestUnlocked = newlyUnlocked[newlyUnlocked.length - 1];
         setLastBadgeMap(setStoredLastBadge(activeKid, latestUnlocked.id));
+        let nextStats = getStoredBadgeStatsMap();
+        newlyUnlocked.forEach((badge) => {
+          nextStats = incrementStoredBadgeCount(activeKid, badge.id);
+        });
+        setBadgeStatsMap(nextStats);
         setBadgeUnlockQueue(queue => [...queue, ...newlyUnlocked]);
       }
     }
     prevEarnedBadgeIds.current = earnedBadges.map(b => b.id);
-  }, [earnedBadgeIdsKey]);
+  }, [activeKid, earnedBadgeIdsKey]);
 
   useEffect(() => {
     if (!activeBadgeUnlock && badgeUnlockQueue.length > 0) {
@@ -3885,12 +3996,6 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
       setBadgeUnlockQueue(rest);
     }
   }, [badgeUnlockQueue, activeBadgeUnlock]);
-
-  useEffect(() => {
-    if (!activeBadgeUnlock) return;
-    const timer = setTimeout(() => setActiveBadgeUnlock(null), 2600);
-    return () => clearTimeout(timer);
-  }, [activeBadgeUnlock]);
 
   if (!cur) return null;
 
@@ -3909,7 +4014,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:17, fontWeight:900, color:th.pri, letterSpacing:'.04em', textTransform:'uppercase' }}>Nieuwe badge!</div>
             <div style={{ fontFamily:"'Baloo 2',cursive", fontSize:30, lineHeight:1.05, fontWeight:800, color:th.priD, marginTop:4 }}>{activeBadgeUnlock.name}</div>
             <div style={{ fontSize:15, lineHeight:1.45, color:'#475569', marginTop:10 }}>{activeBadgeUnlock.hint}</div>
-            <div style={{ marginTop:14, display:'inline-flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:999, background:`${th.pri}14`, color:th.priD, fontSize:13, fontWeight:900, border:`1px solid ${th.pri}2f` }}>+1 badge vrijgespeeld</div>
+            <div style={{ marginTop:14, display:'inline-flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:999, background:`${th.pri}14`, color:th.priD, fontSize:13, fontWeight:900, border:`1px solid ${th.pri}2f` }}>Totaal gehaald: {Math.max(1, Number((badgeStatsMap?.[activeKid] || {})?.[activeBadgeUnlock.id]?.count || activeBadgeUnlock.count || 1))}x</div>
             <div style={{ marginTop:16, display:'flex', justifyContent:'center', gap:10, flexWrap:'wrap' }}>
               <button className="btn" style={{ background: th.hdr, boxShadow: th.hdrShadow, minWidth: 150 }} onClick={() => { setKidTab('badges'); setActiveBadgeUnlock(null); }}>Bekijk badges</button>
               <button className="btn sec" style={{ minWidth: 110 }} onClick={() => setActiveBadgeUnlock(null)}>Top!</button>
@@ -4107,7 +4212,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             Huidige streak: <strong style={{ color: th.priD }}>{badgeState.streak}</strong> dag{badgeState.streak === 1 ? "" : "en"}.
           </div>
           <BadgeShowcase
-            badges={badgeState.badges}
+            badges={mergedBadges}
+            badgeCounts={childBadgeStats}
             theme={th}
             title="Jouw badges"
             subtitle="Verdien badges door streaks, coins en slimme gewoontes."
