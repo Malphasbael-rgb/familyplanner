@@ -4330,6 +4330,8 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
         background: appr || done ? th.taskDoneBg : "#fff",
         borderColor: appr || done ? th.taskDoneBorder : th.pri + "44",
         boxShadow: `0 2px 12px ${th.pri}18`,
+        alignItems: "stretch",
+        minHeight: 108,
       }}
     >
       {showSlay && <div className="slay-popup">💅 Slay Girl! ✨</div>}
@@ -4341,28 +4343,51 @@ function KidTask({ task, db, playTaskDone, childName, theme, isMissed = false })
           borderColor:  done || appr ? th.pri : th.pri + "66",
           color: "#fff",
           fontSize: 20,
+          alignSelf: "center",
         }}
       >
         {(done || appr) ? "✓" : ""}
       </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 800, fontSize: 16, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340", display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 20, lineHeight: 1 }}>{taskEmoji}</span><span>{task.title}</span></div>
-        {taskMeta.visibleDesc && <div style={{ fontSize: 12, color: "var(--t2)" }}>{taskMeta.visibleDesc}</div>}
-        {!done && !appr && (
-          <div style={{ fontSize: 11, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 3 }}>
-            📅 Startdatum {task.date} · {getDayPartConfig(taskMeta.dayPart).emoji} {dayPartLabel} · {daysLeft === 1 ? "⚠️ Laatste dag" : `⏳ Nog ${daysLeft} dag${daysLeft === 1 ? "" : "en"} over`}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", minWidth: 0 }}>
+          <div
+            aria-hidden="true"
+            style={{
+              width: 56,
+              minWidth: 56,
+              height: 56,
+              borderRadius: 16,
+              background: appr || done ? th.badgeBg || `${th.pri}22` : `${th.pri}14`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 32,
+              lineHeight: 1,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,.55), 0 6px 14px ${th.pri}18`,
+            }}
+          >
+            {taskEmoji}
           </div>
-        )}
-        {isMissed && !done && !appr && (
-          <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 3 }}>
-            ⏰ Gemist sinds {task.date} · {taskMeta.baseDecay} coin{taskMeta.baseDecay === 1 ? "" : "s"} verval per gemiste dag
-            {taskMeta.lastDecay !== taskMeta.baseDecay ? ` · laatste verval ${taskMeta.lastDecay}` : ""}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
+            <div style={{ fontWeight: 900, fontSize: 19, lineHeight: 1.15, textDecoration: appr ? "line-through" : "none", color: appr ? "var(--t2)" : "#1e2340", wordBreak: "break-word" }}>{task.title}</div>
+            {taskMeta.visibleDesc && <div style={{ fontSize: 13.5, color: "var(--t2)", marginTop: 4, lineHeight: 1.28, wordBreak: "break-word" }}>{taskMeta.visibleDesc}</div>}
+            {!done && !appr && (
+              <div style={{ fontSize: 11.5, color: isMissed ? "#b45309" : "var(--t2)", fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>
+                📅 Startdatum {task.date} · {getDayPartConfig(taskMeta.dayPart).emoji} {dayPartLabel} · {daysLeft === 1 ? "⚠️ Laatste dag" : `⏳ Nog ${daysLeft} dag${daysLeft === 1 ? "" : "en"} over`}
+              </div>
+            )}
+            {isMissed && !done && !appr && (
+              <div style={{ fontSize: 11.5, color: "#b45309", fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>
+                ⏰ Gemist sinds {task.date} · {taskMeta.baseDecay} coin{taskMeta.baseDecay === 1 ? "" : "s"} verval per gemiste dag
+                {taskMeta.lastDecay !== taskMeta.baseDecay ? ` · laatste verval ${taskMeta.lastDecay}` : ""}
+              </div>
+            )}
+            {done && taskMeta.requiresParentApproval && <div style={{ fontSize: 11.5, color: "#d97706", fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>⏳ Wacht op goedkeuring van ouder</div>}
+            {appr && <div style={{ fontSize: 11.5, color: th.pri, fontWeight: 700, marginTop: 5, lineHeight: 1.28 }}>{taskMeta.requiresParentApproval ? "✅ Goedgekeurd! Coins ontvangen!" : "✅ Meteen afgerond! Coins ontvangen!"}</div>}
           </div>
-        )}
-        {done && taskMeta.requiresParentApproval && <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginTop: 3 }}>⏳ Wacht op goedkeuring van ouder</div>}
-        {appr && <div style={{ fontSize: 11, color: th.pri, fontWeight: 700, marginTop: 3 }}>{taskMeta.requiresParentApproval ? "✅ Goedgekeurd! Coins ontvangen!" : "✅ Meteen afgerond! Coins ontvangen!"}</div>}
+        </div>
       </div>
-      <div style={{ fontWeight: 900, color: "var(--yel)", fontSize: 21, display: "flex", alignItems: "center", gap: 3 }}>🪙{currentCoins}</div>
+      <div style={{ fontWeight: 900, color: "var(--yel)", fontSize: 21, display: "flex", alignItems: "center", gap: 3, alignSelf: "center", whiteSpace: "nowrap" }}>🪙{currentCoins}</div>
     </div>
   );
 }
