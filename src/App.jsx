@@ -3827,10 +3827,10 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     setLastBadgeMap(getStoredLastBadgeMap());
   }, [activeKid]);
 
-  if (!cur) return null;
-  const th = getChildTheme(cur);
-  const levelInfo = getLevelInfo(getLifetimeCoinsForChild(cur));
-  const badgeState = getChildBadgeState({
+  const fallbackChild = cur || { id: activeKid, name: "", theme: "blue", avatar: "🧒", coins: 0 };
+  const th = getChildTheme(fallbackChild);
+  const levelInfo = getLevelInfo(cur ? getLifetimeCoinsForChild(cur) : 0);
+  const badgeState = cur ? getChildBadgeState({
     child: cur,
     data,
     lifetimeCoins: getLifetimeCoinsForChild(cur),
@@ -3839,7 +3839,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     referenceDate: todayNow,
     todayActiveTasks: activeTasks,
     todayDoneCount: doneCount,
-  });
+  }) : { badges: [] };
   const earnedBadges = badgeState.badges.filter(b => b.earned);
   const earnedBadgeIdsKey = earnedBadges.map(b => b.id).sort().join('|');
   const storedLastBadgeId = lastBadgeMap?.[activeKid];
@@ -3871,6 +3871,8 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     const timer = setTimeout(() => setActiveBadgeUnlock(null), 2600);
     return () => clearTimeout(timer);
   }, [activeBadgeUnlock]);
+
+  if (!cur) return null;
 
   return (
     <div style={{ background: th.bg, minHeight: "100vh", margin: "-24px -20px", padding: "24px 20px", position:'relative' }}>
