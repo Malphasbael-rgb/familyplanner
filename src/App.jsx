@@ -23,6 +23,7 @@ const CLOUD_SETTINGS_TITLE = "__familyplanner_parent_settings__";
 const OVERDUE_TRACK_KEY = "familyplanner-overdue-track-v1";
 const COMPLETED_HISTORY_DAYS = 14;
 const LIFETIME_COINS_KEY = "familyplanner-lifetime-coins-v1";
+const LAST_BADGE_KEY = "familyplanner-last-earned-badges-v1";
 const LEVELS = [
   { level: 1, name: "Starter", min: 0 },
   { level: 2, name: "Helper", min: 100 },
@@ -3782,6 +3783,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   const [coinPop, setCoinPop] = useState(false);
   const [badgeUnlockQueue, setBadgeUnlockQueue] = useState([]);
   const [activeBadgeUnlock, setActiveBadgeUnlock] = useState(null);
+  const [lastBadgeMap, setLastBadgeMap] = useState(() => getStoredLastBadgeMap());
   const prevCoins    = useRef(cur?.coins ?? 0);
   const prevDoneCount = useRef(doneCount);
   const prevEarnedBadgeIds = useRef([]);
@@ -3822,6 +3824,7 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
     prevEarnedBadgeIds.current = [];
     setBadgeUnlockQueue([]);
     setActiveBadgeUnlock(null);
+    setLastBadgeMap(getStoredLastBadgeMap());
   }, [activeKid]);
 
   if (!cur) return null;
@@ -3839,12 +3842,16 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
   });
   const earnedBadges = badgeState.badges.filter(b => b.earned);
   const earnedBadgeIdsKey = earnedBadges.map(b => b.id).sort().join('|');
+  const storedLastBadgeId = lastBadgeMap?.[activeKid];
+  const latestBadge = earnedBadges.find(b => b.id === storedLastBadgeId) || earnedBadges[earnedBadges.length - 1] || null;
 
   useEffect(() => {
     const prev = prevEarnedBadgeIds.current;
     if (prev.length > 0) {
       const newlyUnlocked = earnedBadges.filter(b => !prev.includes(b.id));
       if (newlyUnlocked.length) {
+        const latestUnlocked = newlyUnlocked[newlyUnlocked.length - 1];
+        setLastBadgeMap(setStoredLastBadge(activeKid, latestUnlocked.id));
         setBadgeUnlockQueue(queue => [...queue, ...newlyUnlocked]);
       }
     }
@@ -3914,10 +3921,28 @@ function ChildView({ data, db, activeKid, kidTab, setKidTab, playTaskDone, playA
             )}
           </div>
         </div>
-        <div className="kh-right" ref={coinTargetRef} style={{ background: "rgba(255,255,255,.18)", border: "2px solid rgba(255,255,255,.3)" }}>
-          <div className="kh-coins-label" style={{ color: "rgba(255,255,255,.85)" }}>🪙 Mijn coins</div>
-          <div className={`kh-coins-val ${coinPop ? "pop" : ""}`} style={{ color: "#fff" }}>
-            {cur.coins}
+        <div style={{ display:"flex", gap:12, alignItems:"stretch", flexWrap:"wrap", justifyContent:"flex-end" }}>
+          <div className="kh-right" ref={coinTargetRef} style={{ background: "rgba(255,255,255,.18)", border: "2px solid rgba(255,255,255,.3)" }}>
+            <div className="kh-coins-label" style={{ color: "rgba(255,255,255,.85)" }}>🪙 Mijn coins</div>
+            <div className={`kh-coins-val ${coinPop ? "pop" : ""}`} style={{ color: "#fff" }}>
+              {cur.coins}
+            </div>
+          </div>
+          <div className="kh-right" style={{ background: "rgba(255,255,255,.18)", border: "2px solid rgba(255,255,255,.3)", minWidth: 138 }}>
+            <div className="kh-coins-label" style={{ color: "rgba(255,255,255,.85)" }}>🏵️ Laatste badge</div>
+            {latestBadge ? (
+              <>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10, marginTop:4 }}>
+                  <span style={{ fontSize: 30, lineHeight: 1, filter: "drop-shadow(0 2px 6px rgba(255,255,255,.18))" }}>{latestBadge.icon}</span>
+                  <div style={{ textAlign:"left" }}>
+                    <div style={{ color:"#fff", fontSize: 13, fontWeight: 900, lineHeight: 1.1 }}>{latestBadge.shortName}</div>
+                    <div style={{ color:"rgba(255,255,255,.78)", fontSize: 11, fontWeight: 700, marginTop: 3 }}>Badge gehaald</div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div style={{ color:"#fff", fontSize: 14, fontWeight: 800, marginTop: 6 }}>Nog geen badge</div>
+            )}
           </div>
         </div>
       </div>
