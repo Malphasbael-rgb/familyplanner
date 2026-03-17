@@ -355,14 +355,34 @@ function getEffectiveTaskStatus(task) {
 
 function getTemplateOccurrenceTask(templateTask, allTasks = [], referenceDate = getTodayISO()) {
   if (!templateTask || !isRecurringTemplateTask(templateTask)) return null;
-  const occurrenceDate = getRecurringOccurrenceDate(templateTask, referenceDate);
-  if (!occurrenceDate) return null;
-  return allTasks.find((task) => {
+
+  const linked = allTasks.filter((task) => {
     if (!task || isRecurringTemplateTask(task)) return false;
-    if (task.childId !== templateTask.childId || task.date !== occurrenceDate) return false;
+    if (task.childId !== templateTask.childId) return false;
     const info = parseTaskDesc(task.desc, task.coins);
     return info.recurrenceSourceId === templateTask.id;
-  }) || null;
+  });
+  if (!linked.length) return null;
+
+  const occurrenceDate = getRecurringOccurrenceDate(templateTask, referenceDate);
+  if (occurrenceDate) {
+    const exact = linked.find((task) => task.date === occurrenceDate);
+    if (exact) return exact;
+  }
+
+  const ref = new Date(`${referenceDate}T00:00:00`).getTime();
+  const nearby = [...linked]
+    .map((task) => ({
+      task,
+      distance: Math.abs(new Date(`${task.date}T00:00:00`).getTime() - ref),
+    }))
+    .filter((entry) => entry.distance <= 86400000)
+    .sort((a, b) => {
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      return String(b.task.date || '').localeCompare(String(a.task.date || ''));
+    });
+
+  return nearby[0]?.task || null;
 }
 
 function getDisplayTaskStatus(task, allTasks = [], referenceDate = getTodayISO()) {
